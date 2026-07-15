@@ -1,6 +1,7 @@
 module Main (main) where
 
 import System.IO (hFlush, stdout)
+import System.Directory (findExecutable)
 
 
 data EvaluatedResult = PrintAndContinue String | Exit | Continue
@@ -10,22 +11,30 @@ main = do
     putStr "$ "
     hFlush stdout
     cmd <- getLine
-    handleEval $ eval cmd
+    evald_cmd <- eval cmd
+    handleEval evald_cmd
     
-eval :: String -> EvaluatedResult
-eval args = if null args then Continue else eval' (getCommand args) (getRemainingArgs args)
+eval :: String -> IO EvaluatedResult
+eval args = if null args then pure Continue else eval' (getCommand args) (getRemainingArgs args)
 
-eval' :: String -> String -> EvaluatedResult
+
+eval' :: String -> String -> IO EvaluatedResult
 eval' command remainingArgs = case command of 
-    "exit" -> Exit
-    "echo" -> PrintAndContinue remainingArgs
-    "type" -> PrintAndContinue $ handleTypeCommand remainingArgs
-    _ -> PrintAndContinue $ command ++ ": command not found"
+    "exit" -> pure Exit
+    "echo" -> pure $ PrintAndContinue remainingArgs
+    "type" -> do
+        result <- handleTypeCommand remainingArgs
+        pure $ PrintAndContinue result
+    _ -> pure $ PrintAndContinue $ command ++ ": command not found"
 
-handleTypeCommand :: String -> String
+handleTypeCommand :: String -> IO String
 handleTypeCommand remainingArgs = case remainingArgs of
-    x | x `elem` ["exit", "echo", "type"] -> x ++ " is a shell builtin"
-    _ -> remainingArgs <> ": not found"
+    x | x `elem` ["exit", "echo", "type"] -> pure $ x ++ " is a shell builtin"
+    _ -> do 
+        result <- findExecutable remainingArgs
+        case result of
+            Just path -> pure $ remainingArgs ++ " is " ++ path
+            Nothing ->  pure $ remainingArgs ++ ": not found"
 
 getCommand :: String -> String
 getCommand args = head (words args)
