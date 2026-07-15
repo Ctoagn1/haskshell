@@ -9,10 +9,10 @@ main = do
     putStr "$ "
     hFlush stdout
     cmd <- getLine
-    let args = lines cmd 
+    let args = words cmd 
     case head args of 
         "exit" -> exitSuccess
-        "echo" -> putStrLn cmd
+        "echo" -> putStrLn $ unwords $ drop 1 args 
         _ -> putStrLn $ cmd ++ ": command not found"
     hFlush stdout
     main
