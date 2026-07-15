@@ -1,6 +1,7 @@
 module Main (main) where
 
 import System.IO (hFlush, stdout)
+import System.Exit (exitSuccess)
 
 main :: IO ()
 main = do
@@ -8,7 +9,9 @@ main = do
     putStr "$ "
     hFlush stdout
     cmd <- getLine
-    putStrLn $ cmd ++ ": command not found"
+    case cmd of 
+        "exit" -> exitSuccess
+        _ -> putStrLn $ cmd ++ ": command not found"
     hFlush stdout
     main
     pure ()
