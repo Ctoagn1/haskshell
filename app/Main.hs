@@ -10,4 +10,5 @@ main = do
     cmd <- getLine
     putStrLn $ cmd ++ ": command not found"
     hFlush stdout
+    main
     pure ()
