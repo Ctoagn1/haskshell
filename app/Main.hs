@@ -9,8 +9,10 @@ main = do
     putStr "$ "
     hFlush stdout
     cmd <- getLine
-    case cmd of 
+    let args = lines cmd 
+    case head args of 
         "exit" -> exitSuccess
+        "echo" -> putStrLn cmd
         _ -> putStrLn $ cmd ++ ": command not found"
     hFlush stdout
     main
