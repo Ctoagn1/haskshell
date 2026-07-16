@@ -2,7 +2,7 @@ module Main (main) where
 
 import System.IO (hFlush, stdout)
 import System.Directory (findExecutable)
-import System.Process (proc, createProcess)
+import System.Process (callProcess)
 
 
 data EvaluatedResult = PrintAndContinue String | Exit | Continue | Execute FilePath [String]
@@ -30,7 +30,7 @@ eval' command remainingArgs = case command of
 
         isExec <- findExecutable $ getCommand remainingArgs
         case isExec of 
-            Just fp -> pure $ Execute fp (drop 1 $ words remainingArgs)
+            Just fp -> pure $ Execute fp $ words remainingArgs
             _ -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 handleTypeCommand :: String -> IO String
@@ -54,7 +54,7 @@ handleEval evaluatedResult = case evaluatedResult of
     Continue -> main
     Exit -> pure ()
     Execute fp args -> do
-        (Just stdin, Just stdout, Just stderr, p) <- createProcess $ proc fp args 
+        callProcess fp args 
         pure ()
 
 printAndContinue :: String -> IO ()
