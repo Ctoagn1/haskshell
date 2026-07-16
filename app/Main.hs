@@ -37,7 +37,7 @@ eval' command remainingArgs = case command of
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 
-data TokenState = Normal | SingleQuote | DoubleQuote
+data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
 tokenize :: String -> [String]
 tokenize path = 
     go path "" [] Normal
@@ -52,6 +52,7 @@ tokenize path =
                     case c of
                         '\'' -> go cs current tokens SingleQuote
                         '"' -> go cs current tokens DoubleQuote
+                        '\\' -> go cs current tokens (Backslash state)
                         ' ' -> go cs "" (if null current then tokens else tokens ++ [current]) Normal
                         _ -> go cs (current ++ [c]) tokens Normal
                 SingleQuote ->
@@ -62,6 +63,8 @@ tokenize path =
                     case c of 
                         '"' -> go cs current tokens Normal
                         _ -> go cs (current ++ [c]) tokens DoubleQuote
+                Backslash last_state ->
+                    go cs (current ++ [c]) tokens last_state
 
 handleTypeCommand :: String -> IO String
 handleTypeCommand remainingArgs = case remainingArgs of
