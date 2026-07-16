@@ -55,7 +55,7 @@ handleEval evaluatedResult = case evaluatedResult of
     PrintAndContinue str -> printAndContinue str
     Continue -> main
     Exit -> pure ()
-    Execute fp (first : args) -> do
+    Execute fp args -> do
         callProcess fp args 
         pure ()
 
