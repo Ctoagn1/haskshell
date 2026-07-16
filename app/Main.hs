@@ -31,7 +31,7 @@ eval' command remainingArgs = case command of
 
         isExec <- findExecutable command
         case isExec of 
-            Just fp -> pure $ Execute fp $ command : words remainingArgs
+            Just fp -> pure $ Execute fp $ words remainingArgs
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 
@@ -55,8 +55,8 @@ handleEval evaluatedResult = case evaluatedResult of
     PrintAndContinue str -> printAndContinue str
     Continue -> main
     Exit -> pure ()
-    Execute fp args -> do
-        callProcess fp args 
+    Execute fp (first : args) -> do
+        callProcess first args 
         pure ()
 
 printAndContinue :: String -> IO ()
