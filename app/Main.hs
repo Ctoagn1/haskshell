@@ -53,11 +53,11 @@ tokenize path =
                         _ -> go cs (current ++ [c]) tokens Normal
                 SingleQuote ->
                     case c of
-                        '\'' -> go cs "" (tokens ++ [current]) Normal
+                        '\'' -> go cs current tokens Normal
                         _ -> go cs (current ++ [c]) tokens SingleQuote
                 DoubleQuote ->
                     case c of 
-                        '"' -> go cs "" (tokens ++ [current]) Normal
+                        '"' -> go cs current tokens Normal
                         _ -> go cs (current ++ [c]) tokens DoubleQuote
 
 handleTypeCommand :: String -> IO String
