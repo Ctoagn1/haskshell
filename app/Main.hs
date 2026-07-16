@@ -2,7 +2,7 @@ module Main (main) where
 
 import System.IO (hFlush, stdout)
 import System.Directory (findExecutable)
-import System.Process (proc, createProcess)
+import System.Process (callProcess)
 
 
 data EvaluatedResult = PrintAndContinue String | Exit | Continue | Execute FilePath [String]
@@ -55,8 +55,7 @@ handleEval evaluatedResult = case evaluatedResult of
     Continue -> main
     Exit -> pure ()
     Execute fp args -> do
-        (_, _, _, ph) <- createProcess (proc fp args)
-        pure ()
+        callProcess fp args
 
 printAndContinue :: String -> IO ()
 printAndContinue str = do
