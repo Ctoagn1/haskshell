@@ -34,6 +34,32 @@ eval' command remainingArgs = case command of
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 
+data TokenState = Normal | SingleQuote | DoubleQuote
+tokenize :: String -> [String]
+tokenize path = 
+    go path "" [] Normal
+    where 
+        go [] current tokens state
+            | null current = tokens
+            | otherwise = tokens ++ [current]
+
+        go (c:cs) current tokens state =
+            case state of
+                Normal ->
+                    case c of
+                        '\'' -> go cs current tokens SingleQuote
+                        '"' -> go cs current tokens DoubleQuote
+                        ' ' -> go cs "" (tokens ++ [current]) Normal
+                        _ -> go cs (current ++ [c]) tokens Normal
+                SingleQuote ->
+                    case c of
+                        '\'' -> go cs "" (tokens ++ [current]) Normal
+                        _ -> go cs (current ++ [c]) tokens SingleQuote
+                DoubleQuote ->
+                    case c of 
+                        '"' -> go cs "" (tokens ++ [current]) Normal
+                        _ -> go cs (current ++ [c]) tokens DoubleQuote
+
 handleTypeCommand :: String -> IO String
 handleTypeCommand remainingArgs = case remainingArgs of
     x | x `elem` ["exit", "echo", "type"] -> pure $ x ++ " is a shell builtin"
@@ -44,10 +70,10 @@ handleTypeCommand remainingArgs = case remainingArgs of
             Nothing ->  pure $ remainingArgs ++ ": not found"
 
 getCommand :: String -> String
-getCommand args = head (words args)
+getCommand args = head (tokenize args)
 
 getRemainingArgs :: String -> String
-getRemainingArgs args  = unwords (tail $ words args)
+getRemainingArgs args  = unwords (tail $ tokenize args)
 
 handleEval :: EvaluatedResult -> IO ()
 handleEval evaluatedResult = case evaluatedResult of
