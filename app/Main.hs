@@ -49,7 +49,7 @@ tokenize path =
                     case c of
                         '\'' -> go cs current tokens SingleQuote
                         --'"' -> go cs current tokens DoubleQuote
-                        ' ' -> go cs "" (tokens ++ [current]) Normal
+                        ' ' -> go cs "" (if null current then tokens else tokens ++ [current]) Normal
                         _ -> go cs (current ++ [c]) tokens Normal
                 SingleQuote ->
                     case c of
