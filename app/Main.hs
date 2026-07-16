@@ -62,6 +62,7 @@ tokenize path =
                 DoubleQuote ->
                     case c of 
                         '"' -> go cs current tokens Normal
+                        '\\' -> go cs current tokens (Backslash state)
                         _ -> go cs (current ++ [c]) tokens DoubleQuote
                 Backslash last_state ->
                     go cs (current ++ [c]) tokens last_state
