@@ -3,6 +3,7 @@ module Main (main) where
 import System.IO (hFlush, stdout)
 import System.Directory (findExecutable)
 import System.Process (callProcess)
+import System.FilePath (takeFileName)
 
 
 data EvaluatedResult = PrintAndContinue String | Exit | Continue | Execute FilePath [String]
@@ -30,8 +31,9 @@ eval' command remainingArgs = case command of
 
         isExec <- findExecutable command
         case isExec of 
-            Just fp -> pure $ Execute fp $ words remainingArgs
+            Just fp -> pure $ Execute fp $ command : words remainingArgs
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
+
 
 handleTypeCommand :: String -> IO String
 handleTypeCommand remainingArgs = case remainingArgs of
