@@ -56,6 +56,7 @@ handleEval evaluatedResult = case evaluatedResult of
     Exit -> pure ()
     Execute fp args -> do
         callProcess fp args
+        main
 
 printAndContinue :: String -> IO ()
 printAndContinue str = do
