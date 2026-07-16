@@ -81,7 +81,7 @@ handleEval evaluatedResult = case evaluatedResult of
     Continue -> main
     Exit -> pure ()
     Execute fp (first : args) -> do
-        callProcess first args
+        callProcess fp args
         main
 
 printAndContinue :: String -> IO ()
