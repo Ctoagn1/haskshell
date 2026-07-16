@@ -16,21 +16,24 @@ main = do
     handleEval evald_cmd
     
 eval :: String -> IO EvaluatedResult
-eval args = if null args then pure Continue else eval' (getCommand args) (getRemainingArgs args)
+
+eval args = 
+    let tokens = tokenize args
+    in if null tokens then pure Continue else eval' (head tokens) (tail tokens)
 
 
-eval' :: String -> String -> IO EvaluatedResult
+eval' :: String -> [String] -> IO EvaluatedResult
 eval' command remainingArgs = case command of 
     "exit" -> pure Exit
-    "echo" -> pure $ PrintAndContinue remainingArgs
+    "echo" -> pure $ PrintAndContinue $ unwords remainingArgs
     "type" -> do
-        result <- handleTypeCommand remainingArgs
+        result <- handleTypeCommand $ unwords remainingArgs
         pure $ PrintAndContinue result
     _ -> do
 
         isExec <- findExecutable command
         case isExec of 
-            Just fp -> pure $ Execute fp (command : tokenize remainingArgs)
+            Just fp -> pure $ Execute fp (command : remainingArgs)
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 
@@ -69,19 +72,13 @@ handleTypeCommand remainingArgs = case remainingArgs of
             Just path -> pure $ remainingArgs ++ " is " ++ path
             Nothing ->  pure $ remainingArgs ++ ": not found"
 
-getCommand :: String -> String
-getCommand args = head (tokenize args)
-
-getRemainingArgs :: String -> String
-getRemainingArgs args  = unwords (tail $ tokenize args)
-
 handleEval :: EvaluatedResult -> IO ()
 handleEval evaluatedResult = case evaluatedResult of
     PrintAndContinue str -> printAndContinue str
     Continue -> main
     Exit -> pure ()
     Execute fp (first : args) -> do
-        callProcess fp args
+        callProcess first args
         main
 
 printAndContinue :: String -> IO ()
