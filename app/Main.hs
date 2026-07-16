@@ -30,7 +30,7 @@ eval' command remainingArgs = case command of
 
         isExec <- findExecutable command
         case isExec of 
-            Just fp -> pure $ Execute fp (command : words remainingArgs)
+            Just fp -> pure $ Execute fp (command : tokenize remainingArgs)
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 
@@ -48,7 +48,7 @@ tokenize path =
                 Normal ->
                     case c of
                         '\'' -> go cs current tokens SingleQuote
-                        '"' -> go cs current tokens DoubleQuote
+                        --'"' -> go cs current tokens DoubleQuote
                         ' ' -> go cs "" (tokens ++ [current]) Normal
                         _ -> go cs (current ++ [c]) tokens Normal
                 SingleQuote ->
