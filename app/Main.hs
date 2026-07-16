@@ -31,7 +31,7 @@ eval' command remainingArgs = case command of
         isExec <- findExecutable $ getCommand remainingArgs
         case isExec of 
             Just fp -> pure $ Execute fp $ words remainingArgs
-            _ -> pure $ PrintAndContinue $ command ++ ": command not found"
+            Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 handleTypeCommand :: String -> IO String
 handleTypeCommand remainingArgs = case remainingArgs of
