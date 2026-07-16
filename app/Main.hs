@@ -2,9 +2,10 @@ module Main (main) where
 
 import System.IO (hFlush, stdout)
 import System.Directory (findExecutable)
+import System.Process (proc, createProcess)
 
 
-data EvaluatedResult = PrintAndContinue String | Exit | Continue
+data EvaluatedResult = PrintAndContinue String | Exit | Continue | Execute FilePath [String]
 
 main :: IO ()
 main = do
@@ -25,7 +26,12 @@ eval' command remainingArgs = case command of
     "type" -> do
         result <- handleTypeCommand remainingArgs
         pure $ PrintAndContinue result
-    _ -> pure $ PrintAndContinue $ command ++ ": command not found"
+    _ -> do
+
+        isExec <- findExecutable $ getCommand remainingArgs
+        case isExec of 
+            Just fp -> pure $ Execute fp (drop 1 $ words remainingArgs)
+            _ -> pure $ PrintAndContinue $ command ++ ": command not found"
 
 handleTypeCommand :: String -> IO String
 handleTypeCommand remainingArgs = case remainingArgs of
@@ -47,6 +53,9 @@ handleEval evaluatedResult = case evaluatedResult of
     PrintAndContinue str -> printAndContinue str
     Continue -> main
     Exit -> pure ()
+    Execute fp args -> do
+        (Just stdin, Just stdout, Just stderr, p) <- createProcess $ proc fp args 
+        pure ()
 
 printAndContinue :: String -> IO ()
 printAndContinue str = do
