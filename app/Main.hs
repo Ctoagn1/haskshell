@@ -28,7 +28,7 @@ eval' command remainingArgs = case command of
         pure $ PrintAndContinue result
     _ -> do
 
-        isExec <- findExecutable $ getCommand remainingArgs
+        isExec <- findExecutable command
         case isExec of 
             Just fp -> pure $ Execute fp $ words remainingArgs
             Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
