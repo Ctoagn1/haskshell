@@ -37,7 +37,7 @@ completion = completeWord Nothing " " $ \word -> do
     executables <- liftIO getExecutablesFromPATH
     let names = builtinNames ++ executables
     pure [Completion
-            {replacement = name, 
+            {replacement = if word == name then name else name ++ " ", 
             display = name, 
             isFinished = True
             } 
