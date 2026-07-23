@@ -1,8 +1,8 @@
 module Main (main) where
 
-import System.IO (hFlush, hPutStrLn, stdout, withFile, Handle, IOMode (WriteMode))
+import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode))
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory)
-import System.Process (proc, createProcess, std_out, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
+import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
 import Data.List (isPrefixOf)
 import System.FilePath ((</>))
@@ -93,21 +93,24 @@ commandParse input =
                     case x of 
                         "1>" -> go xs args redirect (Redir OutWrite) 
                         ">" -> go xs args redirect (Redir OutWrite) 
+                        "2>" -> go xs args redirect (Redir ErrWrite) 
                         _ -> go xs (args ++ [x]) redirect Norm
                 Redir mode -> go xs args (Just (mode, x)) Norm
 
 runCommand :: Command -> IO Bool
 runCommand command =
     case redirect command of
-        Nothing -> runCommandWith stdout command
-        Just target -> do
-            let (_, t) = target
+        Nothing -> runCommandWith stdout stderr command
+        Just (OutWrite, t) -> do
             path <- expandHome t
             withFile path WriteMode $ \h ->
-                runCommandWith h command
-
-runCommandWith :: Handle -> Command -> IO Bool
-runCommandWith out command = 
+                runCommandWith h stderr command
+        Just (ErrWrite, t) -> do
+            path <- expandHome t
+            withFile path WriteMode $ \h ->
+                runCommandWith stdout h command
+runCommandWith :: Handle -> Handle -> Command -> IO Bool
+runCommandWith out err command = 
     case cmd command of
         "exit" ->
             pure False
@@ -137,7 +140,8 @@ runCommandWith out command =
                     (_, _, _, processHandle) <-
                         createProcess
                         (proc (cmd command) (args command))
-                            { std_out = UseHandle out
+                            { std_out = UseHandle out,
+                            std_err = UseHandle err
                             }
                     _ <- waitForProcess processHandle
                     pure ()
