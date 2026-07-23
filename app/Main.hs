@@ -1,26 +1,67 @@
 module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode))
-import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory)
+import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
+import System.Console.Haskeline (Completion, Settings, InputT, runInputT, getInputLine, complete, defaultSettings, CompletionFunc, completeWord, simpleCompletion)
+import Control.Monad.IO.Class
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
-import Data.List (isPrefixOf)
-import System.FilePath ((</>))
+import Data.List (isPrefixOf, nub)
+import System.FilePath ((</>), splitSearchPath)
+import GHC.IO.Handle.Types (Handle__)
+import GHC.IO.Handle.Internals (flushBuffer)
+import System.Environment (lookupEnv)
+import Control.Monad 
 
+settings :: Settings IO
+settings =
+    (defaultSettings :: Settings IO)
+        { complete = completion
+        }
 
 main :: IO ()
-main = do
-    putStr "$ "
-    hFlush stdout
-    line <- getLine
-    let toks = tokenize line
-    let cmd = commandParse toks
-    continue <- runCommand cmd
-    if continue then main else pure ()
+main = runInputT settings loop
+
+loop :: InputT IO ()
+loop = do 
+    minput <- getInputLine "$ "
+    case minput of 
+        Nothing -> pure ()
+        Just line -> do
+            let cmd = commandParse (tokenize line) 
+            continue <- liftIO (runCommand cmd)
+            if continue then loop else pure ()
+
+completion :: CompletionFunc IO
+completion = completeWord Nothing " " $ \word -> do
+    executables <- liftIO getExecutablesFromPATH
+    let names = builtinNames ++ executables
+    pure $ map simpleCompletion $ filter (word `isPrefixOf`) names
+
+getExecutablesFromPATH :: IO [String]
+getExecutablesFromPATH = do
+    mpath <- lookupEnv "PATH"
+    case mpath of
+        Nothing -> pure []
+        Just path -> do
+            names <- mapM executablesInDir (splitSearchPath path)
+            pure . nub . concat $ names
+
+executablesInDir :: FilePath -> IO [FilePath]
+executablesInDir dir = do
+    exists <- doesDirectoryExist dir
+    if not exists then pure []
+        else do
+            files <- listDirectory dir
+            filterM (isExecutable . (dir </>)) files
 
 
-    
-    
+isExecutable :: FilePath -> IO Bool
+isExecutable path = do
+    isFile <- doesFileExist path
+    if not isFile
+        then pure False
+        else executable <$> getPermissions path
 
 isBuiltin :: String -> Bool
 isBuiltin cmd =
