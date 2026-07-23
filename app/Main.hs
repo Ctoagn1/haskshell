@@ -3,7 +3,7 @@ module Main (main) where
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode))
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
-import System.Console.Haskeline (Completion, Settings, InputT, runInputT, getInputLine, complete, defaultSettings, CompletionFunc, completeWord, simpleCompletion)
+import System.Console.Haskeline (Completion (Completion, replacement, display, isFinished), Settings, InputT, runInputT, getInputLine, complete, defaultSettings, CompletionFunc, completeWord, simpleCompletion)
 import Control.Monad.IO.Class
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
 import Data.List (isPrefixOf, nub)
@@ -36,7 +36,13 @@ completion :: CompletionFunc IO
 completion = completeWord Nothing " " $ \word -> do
     executables <- liftIO getExecutablesFromPATH
     let names = builtinNames ++ executables
-    pure $ map simpleCompletion $ filter (word `isPrefixOf`) names
+    pure [Completion
+            {replacement = name, 
+            display = name, 
+            isFinished = True
+            } 
+        | name <- filter (word `isPrefixOf`) names
+        ]
 
 getExecutablesFromPATH :: IO [String]
 getExecutablesFromPATH = do
