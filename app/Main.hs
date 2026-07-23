@@ -35,9 +35,8 @@ loop = do
 completion :: CompletionFunc IO
 completion = completeWord Nothing " " $ \word -> do
     executables <- liftIO getExecutablesFromPATH
-    let names = builtinNames ++ executables
-    let addSpace x = if last x == ' ' then x else x ++ [' ']
-    pure $ map (simpleCompletion . addSpace) $ filter (word `isPrefixOf`) names
+    let names = nub (builtinNames ++ executables)
+    pure $ map simpleCompletion $ filter (word `isPrefixOf`) names
 
 getExecutablesFromPATH :: IO [String]
 getExecutablesFromPATH = do
