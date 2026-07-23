@@ -119,16 +119,16 @@ runCommandWith out command =
             hPutStrLn out (unwords (args command))
             pure True
         "type" -> do
-
-            if isBuiltin (unwords (args command))
-                then hPutStrLn out $ cmd command ++ " is a shell builtin"
+            let arg = unwords (args command)
+            if isBuiltin arg
+                then hPutStrLn out $ arg ++ " is a shell builtin"
                 else do
-                result <- findExecutable (unwords (args command))
+                result <- findExecutable arg
                 case result of
                     Just fullPath ->
-                        hPutStrLn out $ cmd command ++ " is " ++ fullPath
+                        hPutStrLn out $ arg ++ " is " ++ fullPath
                     Nothing ->
-                        hPutStrLn out $ cmd command ++ ": not found"
+                        hPutStrLn out $ arg ++ ": not found"
             pure True
         _ -> do
             result <- findExecutable (cmd command)
