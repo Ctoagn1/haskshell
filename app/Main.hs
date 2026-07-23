@@ -1,6 +1,6 @@
 module Main (main) where
 
-import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode))
+import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode))
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
@@ -93,7 +93,10 @@ commandParse input =
                     case x of 
                         "1>" -> go xs args redirect (Redir OutWrite) 
                         ">" -> go xs args redirect (Redir OutWrite) 
+                        ">>" -> go xs args redirect (Redir OutAppend) 
+                        "1>>" -> go xs args redirect (Redir OutAppend) 
                         "2>" -> go xs args redirect (Redir ErrWrite) 
+                        "2>>" -> go xs args redirect (Redir ErrAppend) 
                         _ -> go xs (args ++ [x]) redirect Norm
                 Redir mode -> go xs args (Just (mode, x)) Norm
 
@@ -108,6 +111,14 @@ runCommand command =
         Just (ErrWrite, t) -> do
             path <- expandHome t
             withFile path WriteMode $ \h ->
+                runCommandWith stdout h command
+        Just (OutAppend, t) -> do
+            path <- expandHome t
+            withFile path AppendMode $ \h ->
+                runCommandWith h stderr command
+        Just (ErrAppend, t) -> do
+            path <- expandHome t
+            withFile path AppendMode $ \h ->
                 runCommandWith stdout h command
 runCommandWith :: Handle -> Handle -> Command -> IO Bool
 runCommandWith out err command = 
