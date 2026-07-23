@@ -1,40 +1,33 @@
 module Main (main) where
 
-import System.IO (hFlush, stdout)
-import System.Directory (findExecutable)
-import System.Process (callProcess)
+import System.IO (hFlush, hPutStrLn, stdout, withFile, Handle, IOMode (WriteMode))
+import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory)
+import System.Process (proc, createProcess, std_out, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
+import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
+import Data.List (isPrefixOf)
+import System.FilePath ((</>))
 
-
-data EvaluatedResult = PrintAndContinue String | Exit | Continue | Execute FilePath [String]
 
 main :: IO ()
 main = do
     putStr "$ "
     hFlush stdout
-    cmd <- getLine
-    evald_cmd <- eval cmd
-    handleEval evald_cmd
+    line <- getLine
+    let toks = tokenize line
+    let cmd = commandParse toks
+    continue <- runCommand cmd
+    if continue then main else pure ()
+
+
     
-eval :: String -> IO EvaluatedResult
+    
 
-eval args = 
-    let tokens = tokenize args
-    in if null tokens then pure Continue else eval' (head tokens) (tail tokens)
+isBuiltin :: String -> Bool
+isBuiltin cmd =
+  cmd `elem` builtinNames
 
-
-eval' :: String -> [String] -> IO EvaluatedResult
-eval' command remainingArgs = case command of 
-    "exit" -> pure Exit
-    "echo" -> pure $ PrintAndContinue $ unwords remainingArgs
-    "type" -> do
-        result <- handleTypeCommand $ unwords remainingArgs
-        pure $ PrintAndContinue result
-    _ -> do
-
-        isExec <- findExecutable command
-        case isExec of 
-            Just fp -> pure $ Execute fp (command : remainingArgs)
-            Nothing -> pure $ PrintAndContinue $ command ++ ": command not found"
+builtinNames =
+  ["exit", "echo", "type", "pwd"]
 
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
@@ -76,17 +69,90 @@ handleTypeCommand remainingArgs = case remainingArgs of
             Just path -> pure $ remainingArgs ++ " is " ++ path
             Nothing ->  pure $ remainingArgs ++ ": not found"
 
-handleEval :: EvaluatedResult -> IO ()
-handleEval evaluatedResult = case evaluatedResult of
-    PrintAndContinue str -> printAndContinue str
-    Continue -> main
-    Exit -> pure ()
-    Execute fp (first : args) -> do
-        callProcess first args
-        main
+
 
 printAndContinue :: String -> IO ()
 printAndContinue str = do
     putStrLn str
     hFlush stdout
     main
+
+data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String)}
+data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 
+data ParseMode = Redir Redirect | Norm
+data ParseError = SyntaxError
+commandParse :: [String] -> Command
+commandParse input = 
+    
+    go input [] Nothing Norm
+    where 
+        go [] args redirect _ = Command {cmd = head args, args = tail args, redirect = redirect}
+        go (x:xs) args redirect mode = 
+            case mode of 
+                Norm ->
+                    case x of 
+                        "1>" -> go xs args redirect (Redir OutWrite) 
+                        ">" -> go xs args redirect (Redir OutWrite) 
+                        _ -> go xs (args ++ [x]) redirect Norm
+                Redir mode -> go xs args (Just (mode, x)) Norm
+
+runCommand :: Command -> IO Bool
+runCommand command =
+    case redirect command of
+        Nothing -> runCommandWith stdout command
+        Just target -> do
+            let (_, t) = target
+            path <- expandHome t
+            withFile path WriteMode $ \h ->
+                runCommandWith h command
+
+runCommandWith :: Handle -> Command -> IO Bool
+runCommandWith out command = 
+    case cmd command of
+        "exit" ->
+            pure False
+        "pwd" -> do
+            cwd <- getCurrentDirectory
+            hPutStrLn out cwd
+            pure True
+        "echo" -> do
+            hPutStrLn out (unwords (args command))
+            pure True
+        "type" -> do
+
+            if isBuiltin (cmd command)
+                then hPutStrLn out $ cmd command ++ " is a shell builtin"
+                else do
+                result <- findExecutable (cmd command)
+                case result of
+                    Just fullPath ->
+                        hPutStrLn out $ cmd command ++ " is " ++ fullPath
+                    Nothing ->
+                        hPutStrLn out $ cmd command ++ ": not found"
+            pure True
+        _ -> do
+            result <- findExecutable (cmd command)
+            case result of
+                Just fullPath -> do
+                    (_, _, _, processHandle) <-
+                        createProcess
+                        (proc (cmd command) (args command))
+                            { std_out = UseHandle out
+                            }
+                    _ <- waitForProcess processHandle
+                    pure ()
+                Nothing ->
+                    hPutStrLn out $ cmd command ++ ": command not found"
+            pure True
+
+
+
+expandHome :: FilePath -> IO FilePath
+expandHome path
+  | path == "~" =
+      getHomeDirectory
+  | "~/" `isPrefixOf` path = do
+      home <- getHomeDirectory
+      pure (home </> drop 2 path)
+  | otherwise =
+      pure path
