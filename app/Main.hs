@@ -120,10 +120,10 @@ runCommandWith out command =
             pure True
         "type" -> do
 
-            if isBuiltin (cmd command)
+            if isBuiltin (unwords (args command))
                 then hPutStrLn out $ cmd command ++ " is a shell builtin"
                 else do
-                result <- findExecutable (cmd command)
+                result <- findExecutable (unwords (args command))
                 case result of
                     Just fullPath ->
                         hPutStrLn out $ cmd command ++ " is " ++ fullPath
