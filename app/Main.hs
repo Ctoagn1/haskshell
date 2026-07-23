@@ -36,7 +36,7 @@ completion :: CompletionFunc IO
 completion = completeWord Nothing " " $ \word -> do
     executables <- liftIO getExecutablesFromPATH
     let names = builtinNames ++ executables
-    pure $ map (simpleCompletion . (++ " ")) $ filter (word `isPrefixOf`) names
+    pure $ map simpleCompletion $ filter (word `isPrefixOf`) names
 
 getExecutablesFromPATH :: IO [String]
 getExecutablesFromPATH = do
