@@ -81,7 +81,7 @@ handleCompletion word prev = do
         (_, OtherKey) -> do
             putChar '\x07'
             hFlush stdout
-            loop word TabKey
+            loop (longestCommonPrefix matches) TabKey
         (_, TabKey) -> do
             putChar '\n'
             putStr $ intercalate "\t" matches
@@ -90,8 +90,14 @@ handleCompletion word prev = do
             hFlush stdout
             loop word TabKey
 
-        
 
+commonPrefix :: String -> String -> String
+commonPrefix (x : xs) (y : ys)
+  | x == y = x : commonPrefix xs ys
+commonPrefix _ _ = ""
+
+longestCommonPrefix :: [String] -> String
+longestCommonPrefix = foldl1 commonPrefix
 
 
 
