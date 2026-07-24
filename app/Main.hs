@@ -1,42 +1,99 @@
 module Main (main) where
 
-import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode))
-import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions)
+import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
+import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
-import System.Console.Haskeline (Completion, Settings, InputT, runInputT, getInputLine, complete, defaultSettings, CompletionFunc, completeWord, simpleCompletion)
 import Control.Monad.IO.Class
+import System.Posix.Terminal
+import System.Posix.IO (stdInput)
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
-import Data.List (isPrefixOf, nub)
+import Data.List (isPrefixOf, nub, intercalate)
 import System.FilePath ((</>), splitSearchPath)
 import GHC.IO.Handle.Types (Handle__)
 import GHC.IO.Handle.Internals (flushBuffer)
 import System.Environment (lookupEnv)
 import Control.Monad 
 
-settings :: Settings IO
-settings =
-    (defaultSettings :: Settings IO)
-        { complete = completion
-        }
 
+
+data KeyType = TabKey | OtherKey
 main :: IO ()
-main = runInputT settings loop
+main = do
+    enableRawMode
+    putStr "$ "
+    hFlush stdout
+    loop "" OtherKey
 
-loop :: InputT IO ()
-loop = do 
-    minput <- getInputLine "$ "
-    case minput of 
-        Nothing -> pure ()
-        Just line -> do
-            let cmd = commandParse (tokenize line) 
-            continue <- liftIO (runCommand cmd)
-            if continue then loop else pure ()
 
-completion :: CompletionFunc IO
-completion = completeWord Nothing " " $ \word -> do
-    executables <- liftIO getExecutablesFromPATH
+
+enableRawMode :: IO TerminalAttributes
+enableRawMode = do
+    old <- getTerminalAttributes stdInput 
+    let raw = foldl withoutMode old [EnableEcho, ProcessInput, KeyboardInterrupts, StartStopOutput]
+    setTerminalAttributes stdInput raw Immediately
+    pure old
+loop :: String -> KeyType -> IO ()
+loop buf prev= do 
+    ch <- getChar
+    case ch of
+        '\n' -> do
+            if null buf then do 
+                putStr "\n$ "
+                hFlush stdout
+                loop "" OtherKey 
+            else do
+                putChar '\n'
+                continue <- runCommand(commandParse(tokenize buf))
+                if continue then do
+                    putStr "$ "
+                    hFlush stdout
+                    loop "" OtherKey
+                else pure ()
+        '\t' -> do 
+            handleCompletion buf prev
+            
+        '\DEL' -> if null buf then loop buf OtherKey else do
+            putStr "\b  \b\b"
+            hFlush stdout
+            loop (init buf) OtherKey
+        _ -> do
+            putChar ch
+            hFlush stdout
+            loop (buf ++ [ch]) OtherKey
+
+
+handleCompletion :: String -> KeyType -> IO ()
+handleCompletion word prev = do
+    executables <- getExecutablesFromPATH
     let names = nub (builtinNames ++ executables)
-    pure $ map simpleCompletion $ filter (word `isPrefixOf`) names
+    let matches = filter (word `isPrefixOf`) names
+    case (matches, prev) of
+        ([], _) -> do
+            putChar '\x07'
+            hFlush stdout
+            loop word OtherKey
+        ([one], _) -> do
+            let current_length = length word
+                to_put = drop current_length one
+            putStr $ to_put ++ " "
+            hFlush stdout
+            loop (one ++ " ") OtherKey
+        (_, OtherKey) -> do
+            putChar '\x07'
+            hFlush stdout
+            loop word TabKey
+        (_, TabKey) -> do
+            putChar '\n'
+            putStr $ intercalate "\t" matches
+            putChar '\n'
+            putStr $ "$ " ++ word
+            hFlush stdout
+            loop word TabKey
+
+        
+
+
+
 
 getExecutablesFromPATH :: IO [String]
 getExecutablesFromPATH = do
@@ -110,13 +167,6 @@ handleTypeCommand remainingArgs = case remainingArgs of
             Just path -> pure $ remainingArgs ++ " is " ++ path
             Nothing ->  pure $ remainingArgs ++ ": not found"
 
-
-
-printAndContinue :: String -> IO ()
-printAndContinue str = do
-    putStrLn str
-    hFlush stdout
-    main
 
 data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String)}
 data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 

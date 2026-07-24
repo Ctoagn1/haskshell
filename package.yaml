@@ -15,7 +15,7 @@ dependencies:
   - process
   - directory
   - filepath
-  - haskeline
+  - unix
 
 executables:
   codecrafters-shell-exe:
