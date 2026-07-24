@@ -89,7 +89,7 @@ handleCompletion word prev = do
             loop complete TabKey
         (_, TabKey) -> do
             putChar '\n'
-            putStr $ unwords matches
+            putStr $ intercalate "  " matches
             putChar '\n'
             putStr $ "$ " ++ word
             hFlush stdout
