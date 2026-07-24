@@ -7,7 +7,7 @@ import Control.Monad.IO.Class
 import System.Posix.Terminal
 import System.Posix.IO (stdInput)
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
-import Data.List (isPrefixOf, nub, intercalate)
+import Data.List (isPrefixOf, nub, intercalate, sort)
 import System.FilePath ((</>), splitSearchPath)
 import GHC.IO.Handle.Types (Handle__)
 import GHC.IO.Handle.Internals (flushBuffer)
@@ -89,7 +89,7 @@ handleCompletion word prev = do
             loop complete TabKey
         (_, TabKey) -> do
             putChar '\n'
-            putStr $ intercalate "  " matches
+            putStr $ intercalate "\t" (sort matches)
             putChar '\n'
             putStr $ "$ " ++ word
             hFlush stdout
