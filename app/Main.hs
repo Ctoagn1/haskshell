@@ -81,7 +81,12 @@ handleCompletion word prev = do
         (_, OtherKey) -> do
             putChar '\x07'
             hFlush stdout
-            loop (longestCommonPrefix matches) TabKey
+            let current_length = length word
+                complete = longestCommonPrefix matches
+                to_put = drop current_length complete
+            putStr to_put
+            hFlush stdout
+            loop complete TabKey
         (_, TabKey) -> do
             putChar '\n'
             putStr $ intercalate "\t" matches
