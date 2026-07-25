@@ -111,7 +111,11 @@ handleCompletion input prev = do
                     let current_length = length fileName
                         to_put = drop current_length one
 
-                    putStr $ to_put ++ " "
+                    isD <- isDir  (wd ++ to_put)
+                    if isD then 
+                        putStr $ to_put ++ "/"
+                    else
+                        putStr $ to_put ++ " "
                     hFlush stdout
                     loop (input ++ to_put ++ " ") OtherKey
                 (_, OtherKey) -> do
@@ -131,12 +135,21 @@ handleCompletion input prev = do
                     hFlush stdout
                     loop input TabKey
 
+
+isDir :: String -> IO Bool
+isDir ('/':path) =
+    doesDirectoryExist ('/':path)
+isDir path = do
+    cwd <- getCurrentDirectory
+    doesDirectoryExist (cwd </> path)
+
 getCompletedFiles :: String -> IO [FilePath]
 getCompletedFiles ('/' : path) = do
     let (dir, file) = splitFileName ('/' : path) 
     dirExists <- doesDirectoryExist dir
     if dirExists then do
         files <- getDirectoryContents dir
+        
         if null file then
             pure $ filter (\x -> '.' /= head x) files
         else 
