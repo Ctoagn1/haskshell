@@ -111,9 +111,7 @@ handleCompletion input prev = do
                 ([one], _) -> do
                     let current_length = length fileName
                         to_put = drop current_length one
-
-                    isD <- isDir  (wd ++ to_put)
-                    let ch = if isD then "/" else " "
+                    let ch = if last one == '/' then "" else " "
                     putStr $ to_put ++ ch
                     hFlush stdout
                     loop (input ++ to_put ++ ch) OtherKey
@@ -143,29 +141,23 @@ isDir path = do
     doesDirectoryExist (cwd </> path)
 
 getCompletedFiles :: String -> IO [FilePath]
-getCompletedFiles ('/' : path) = do
-    let (dir, file) = splitFileName ('/' : path) 
-    dirExists <- doesDirectoryExist dir
-    if dirExists then do
-        files <- getDirectoryContents dir
-        
-        if null file then
-            pure $ filter (\x -> '.' /= head x) files
-        else 
-            pure $ filter (file `isPrefixOf` ) files
-    else
-        pure []
 getCompletedFiles path = do
     let (dir, file) = splitFileName path
     cwd <- getCurrentDirectory
-    let newDir = cwd </> dir
+    let newDir = if "/" `isPrefixOf` dir then cwd </> dir else dir
     dirExists <- doesDirectoryExist newDir
     if dirExists then do
-        files <- getDirectoryContents (cwd </> dir)
-        if null file then
-            pure $ filter (\x -> '.' /= head x) files
-        else 
-            pure $ filter (file `isPrefixOf` ) files
+        files <- getDirectoryContents newDir
+        if null file then do
+            let filt = filter (\x -> '.' /= head x) files
+            mapM (\x -> do
+                isD <- isDir (dir </> x)
+                pure $ if isD then x ++ "/" else x) filt
+        else do
+            let filt =  filter (file `isPrefixOf` ) files
+            mapM (\x -> do
+                isD <- isDir (dir </> x)
+                pure $ if isD then x ++ "/" else x) filt
     else
         pure []
     
