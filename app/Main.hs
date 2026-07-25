@@ -114,10 +114,17 @@ handleCompletion input prev = do
                     putStr $ to_put ++ " "
                     hFlush stdout
                     loop (input ++ to_put ++ " ") OtherKey
+                ([".", "..", one], _) -> do
+                    let current_length = length fileName
+                        to_put = drop current_length one
+
+                    putStr $ to_put ++ " "
+                    hFlush stdout
+                    loop (input ++ to_put ++ " ") OtherKey
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
-                    let current_length = length fileName
+                    let current_length = length wd
                         complete = longestCommonPrefix matches
                         to_put = drop current_length complete
                     putStr to_put
