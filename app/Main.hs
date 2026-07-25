@@ -112,12 +112,10 @@ handleCompletion input prev = do
                         to_put = drop current_length one
 
                     isD <- isDir  (wd ++ to_put)
-                    if isD then 
-                        putStr $ to_put ++ "/"
-                    else
-                        putStr $ to_put ++ " "
+                    let ch = if isD then "/" else " "
+                    putStr $ to_put ++ ch
                     hFlush stdout
-                    loop (input ++ to_put ++ " ") OtherKey
+                    loop (input ++ to_put ++ ch) OtherKey
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
