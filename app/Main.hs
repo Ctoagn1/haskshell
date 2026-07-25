@@ -114,13 +114,6 @@ handleCompletion input prev = do
                     putStr $ to_put ++ " "
                     hFlush stdout
                     loop (input ++ to_put ++ " ") OtherKey
-                ([".", "..", one], _) -> do
-                    let current_length = length fileName
-                        to_put = drop current_length one
-
-                    putStr $ to_put ++ " "
-                    hFlush stdout
-                    loop (input ++ to_put ++ " ") OtherKey
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
@@ -144,7 +137,10 @@ getCompletedFiles ('/' : path) = do
     dirExists <- doesDirectoryExist dir
     if dirExists then do
         files <- getDirectoryContents dir
-        pure $ filter (file `isPrefixOf` ) files
+        if null file then
+            pure $ filter (\x -> '.' /= head x) files
+        else 
+            pure $ filter (file `isPrefixOf` ) files
     else
         pure []
 getCompletedFiles path = do
@@ -154,7 +150,10 @@ getCompletedFiles path = do
     dirExists <- doesDirectoryExist newDir
     if dirExists then do
         files <- getDirectoryContents (cwd </> dir)
-        pure $ filter (file `isPrefixOf` ) files
+        if null file then
+            pure $ filter (\x -> '.' /= head x) files
+        else 
+            pure $ filter (file `isPrefixOf` ) files
     else
         pure []
     
