@@ -64,7 +64,8 @@ loop buf prev= do
 
 handleCompletion :: String -> KeyType -> IO ()
 handleCompletion input prev = do
-    let allwords = splitKeepTrailing ' ' input
+    let wds=  words input
+    let allwords = if last input == ' ' then wds ++ [""] else wds
     case allwords of
         [] -> loop input OtherKey
         [command] -> do
