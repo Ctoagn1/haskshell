@@ -322,6 +322,9 @@ runCommandWith out err command =
                     Nothing ->
                         hPutStrLn out $ arg ++ ": not found"
             pure True
+        "complete" -> do
+            hPutStrLn out (complete (args command) Awaiting)
+            pure True
         _ -> do
             result <- findExecutable (cmd command)
             case result of
@@ -338,6 +341,16 @@ runCommandWith out err command =
                     hPutStrLn out $ cmd command ++ ": command not found"
             pure True
 
+data CompleteMode = Awaiting | Print | Add
+complete :: [String] -> CompleteMode -> String
+complete [] _ = "complete: not enough args provided"
+complete (arg:args) Awaiting = 
+    case arg of
+        "-p" -> complete args Print
+        "-C" -> complete args Add
+        _ -> "complete: " ++ arg ++ ": invalid arg"
+complete (arg:args) Print =
+    "complete: " ++ arg ++ ": no completion specification"
 
 
 expandHome :: FilePath -> IO FilePath
