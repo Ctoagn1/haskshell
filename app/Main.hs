@@ -212,7 +212,7 @@ isBuiltin cmd =
   cmd `elem` builtinNames
 
 builtinNames =
-  ["exit", "echo", "type", "pwd"]
+  ["exit", "echo", "type", "pwd", "complete"]
 
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
