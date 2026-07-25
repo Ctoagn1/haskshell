@@ -8,7 +8,7 @@ import System.Posix.Terminal
 import System.Posix.IO (stdInput)
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
 import Data.List (isPrefixOf, nub, intercalate, sort)
-import System.FilePath ((</>), splitSearchPath)
+import System.FilePath ((</>), splitSearchPath, splitFileName)
 import GHC.IO.Handle.Types (Handle__)
 import GHC.IO.Handle.Internals (flushBuffer)
 import System.Environment (lookupEnv)
@@ -99,17 +99,16 @@ handleCompletion input prev = do
                     hFlush stdout
                     loop input TabKey
         _ -> do
-            dir <- getCurrentDirectory
-            files <- getDirectoryContents dir
             let wd = last allwords
-            let matches = filter (wd `isPrefixOf`) files
+            let (_, fileName) = splitFileName wd
+            matches <- getCompletedFiles wd
             case (matches, prev) of
                 ([], _) -> do
                     putChar '\x07'
                     hFlush stdout
                     loop input OtherKey
                 ([one], _) -> do
-                    let current_length = length wd
+                    let current_length = length fileName
                         to_put = drop current_length one
 
                     putStr $ to_put ++ " "
@@ -118,7 +117,7 @@ handleCompletion input prev = do
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
-                    let current_length = length wd
+                    let current_length = length fileName
                         complete = longestCommonPrefix matches
                         to_put = drop current_length complete
                     putStr to_put
@@ -132,7 +131,26 @@ handleCompletion input prev = do
                     hFlush stdout
                     loop input TabKey
 
-
+getCompletedFiles :: String -> IO [FilePath]
+getCompletedFiles ('/' : path) = do
+    let (dir, file) = splitFileName ('/' : path) 
+    dirExists <- doesDirectoryExist dir
+    if dirExists then do
+        files <- getDirectoryContents dir
+        pure $ filter (file `isPrefixOf` ) files
+    else
+        pure []
+getCompletedFiles path = do
+    let (dir, file) = splitFileName path
+    cwd <- getCurrentDirectory
+    let newDir = cwd </> dir
+    dirExists <- doesDirectoryExist newDir
+    if dirExists then do
+        files <- getDirectoryContents (cwd </> dir)
+        pure $ filter (file `isPrefixOf` ) files
+    else
+        pure []
+    
             
 
 
