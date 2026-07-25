@@ -64,7 +64,7 @@ loop buf prev= do
 
 handleCompletion :: String -> KeyType -> IO ()
 handleCompletion input prev = do
-    let allwords = words input
+    let allwords = splitKeepTrailing ' ' input
     case allwords of
         [] -> loop input OtherKey
         [command] -> do
@@ -171,7 +171,14 @@ getCompletedFiles path = do
         pure []
     
             
-
+splitKeepTrailing :: Char -> String -> [String]
+splitKeepTrailing c s =
+    go s ""
+  where
+    go [] current = [current]
+    go (x:xs) current
+        | x == c    = current : go xs ""
+        | otherwise = go xs (current ++ [x])
 
 
 commonPrefix :: String -> String -> String
