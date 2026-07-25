@@ -5,6 +5,7 @@
 # failures.
 #
 # DON'T EDIT THIS!
+system-ghc: true
 resolver: lts-23.18
 
 packages:

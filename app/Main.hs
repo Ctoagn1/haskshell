@@ -1,7 +1,7 @@
 module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
-import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist)
+import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
 import Control.Monad.IO.Class
 import System.Posix.Terminal
@@ -63,37 +63,78 @@ loop buf prev= do
 
 
 handleCompletion :: String -> KeyType -> IO ()
-handleCompletion word prev = do
-    executables <- getExecutablesFromPATH
-    let names = nub (builtinNames ++ executables)
-    let matches = filter (word `isPrefixOf`) names
-    case (matches, prev) of
-        ([], _) -> do
-            putChar '\x07'
-            hFlush stdout
-            loop word OtherKey
-        ([one], _) -> do
-            let current_length = length word
-                to_put = drop current_length one
-            putStr $ to_put ++ " "
-            hFlush stdout
-            loop (one ++ " ") OtherKey
-        (_, OtherKey) -> do
-            putChar '\x07'
-            hFlush stdout
-            let current_length = length word
-                complete = longestCommonPrefix matches
-                to_put = drop current_length complete
-            putStr to_put
-            hFlush stdout
-            loop complete TabKey
-        (_, TabKey) -> do
-            putChar '\n'
-            putStr $ intercalate "\t" (sort matches)
-            putChar '\n'
-            putStr $ "$ " ++ word
-            hFlush stdout
-            loop word TabKey
+handleCompletion input prev = do
+    let allwords = words input
+    case allwords of
+        [] -> loop input OtherKey
+        [command] -> do
+            executables <- getExecutablesFromPATH
+            let names = nub (builtinNames ++ executables)
+            let matches = filter (input `isPrefixOf`) names
+            case (matches, prev) of
+                ([], _) -> do
+                    putChar '\x07'
+                    hFlush stdout
+                    loop input OtherKey
+                ([one], _) -> do
+                    let current_length = length input
+                        to_put = drop current_length one
+                    putStr $ to_put ++ " "
+                    hFlush stdout
+                    loop (one ++ " ") OtherKey
+                (_, OtherKey) -> do
+                    putChar '\x07'
+                    hFlush stdout
+                    let current_length = length input
+                        complete = longestCommonPrefix matches
+                        to_put = drop current_length complete
+                    putStr to_put
+                    hFlush stdout
+                    loop complete TabKey
+                (_, TabKey) -> do
+                    putChar '\n'
+                    putStr $ intercalate "\t" (sort matches)
+                    putChar '\n'
+                    putStr $ "$ " ++ input
+                    hFlush stdout
+                    loop input TabKey
+        _ -> do
+            dir <- getCurrentDirectory
+            files <- getDirectoryContents dir
+            let wd = last allwords
+            let matches = filter (wd `isPrefixOf`) files
+            case (matches, prev) of
+                ([], _) -> do
+                    putChar '\x07'
+                    hFlush stdout
+                    loop input OtherKey
+                ([one], _) -> do
+                    let current_length = length wd
+                        to_put = drop current_length one
+
+                    putStr $ to_put ++ " "
+                    hFlush stdout
+                    loop (input ++ to_put ++ " ") OtherKey
+                (_, OtherKey) -> do
+                    putChar '\x07'
+                    hFlush stdout
+                    let current_length = length wd
+                        complete = longestCommonPrefix matches
+                        to_put = drop current_length complete
+                    putStr to_put
+                    hFlush stdout
+                    loop (input ++ to_put) TabKey
+                (_, TabKey) -> do
+                    putChar '\n'
+                    putStr $ intercalate "\t" (sort matches)
+                    putChar '\n'
+                    putStr $ "$ " ++ input
+                    hFlush stdout
+                    loop input TabKey
+
+
+            
+
 
 
 commonPrefix :: String -> String -> String
