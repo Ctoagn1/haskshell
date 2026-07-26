@@ -367,7 +367,7 @@ complete (arg:args) Print c =
             Just y -> pure ("complete -C \'" ++ y ++ "\' " ++ arg, c )
 complete (arg:args) AddPath c = do
     fullpath <- resolvePath arg
-    isExec <- doesFileExist fullpath
+    let isExec = True
     if isExec then 
         complete args (AddName fullpath) c 
     else
