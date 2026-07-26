@@ -2,7 +2,7 @@ module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents)
-import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle))
+import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess)
 import Control.Monad.IO.Class
 import System.Posix.Terminal
 import System.Posix.IO (stdInput)
@@ -110,7 +110,7 @@ handleCompletion input prev state = do
             let (_, fileName) = splitFileName wd
             matches <- case getCompletions allwords Nothing state of
                     Nothing -> getCompletedFiles wd
-                    Just (str, path) -> getCompletionOutput path 
+                    Just (str, path) -> getCompletionOutput path str wd pre_wd
 
 
             case (matches, prev) of
@@ -149,9 +149,11 @@ getCompletions (x:xs) cur c =
         Just y -> getCompletions xs (pure (x, y)) c
         Nothing -> getCompletions xs cur c
 
-getCompletionOutput :: FilePath -> String -> String -> String -> [String]
-getCompletionOutput path cur prev comp =
-    
+getCompletionOutput :: FilePath -> String -> String -> String -> IO [String]
+getCompletionOutput path comp cur prev = do
+    output <- readProcess path [comp, cur, prev] ""
+    pure $ lines output
+
 
 isDir :: String -> IO Bool
 isDir ('/':path) =
@@ -287,7 +289,6 @@ handleTypeCommand remainingArgs = case remainingArgs of
 data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String)}
 data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 
 data ParseMode = Redir Redirect | Norm
-data ParseError = SyntaxError
 commandParse :: [String] -> Command
 commandParse input = 
     
