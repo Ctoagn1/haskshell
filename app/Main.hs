@@ -356,7 +356,7 @@ runCommandWith out err command state =
                         hPutStrLn out $ arg ++ ": not found"
             pure (True, state)
         "complete" -> do
-            (str, nstate) <- complete (args command) Awaiting state
+            (str, nstate) <- completeFunc (args command) Awaiting state
             if null str then pure 
                 (True, nstate)
             else do
@@ -379,21 +379,21 @@ runCommandWith out err command state =
             pure (True, state)
 
 data CompleteMode = Awaiting | Print | AddPath | AddName String
-complete :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
-complete [] _ c = pure ("complete: not enough args provided", c)
-complete (arg:args) Awaiting c = 
+completeFunc :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
+completeFunc [] _ c = pure ("complete: not enough args provided", c)
+completeFunc (arg:args) Awaiting c = 
     case arg of
-        "-p" -> complete args Print c
-        "-C" -> complete args AddPath c
+        "-p" -> completeFunc args Print c
+        "-C" -> completeFunc args AddPath c
         _ -> pure ("complete: " ++ arg ++ ": invalid arg", c)
-complete (arg:args) Print c =
+completeFunc (arg:args) Print c =
     let x = Map.lookup arg (completions c) in
         case x of
             Nothing -> pure ("complete: " ++ arg ++ ": no completion specification", c)
             Just y -> pure ("complete -C \'" ++ y ++ "\' " ++ arg, c )
-complete (arg:args) AddPath c = do
+completeFunc (arg:args) AddPath c = do
     fullpath <- resolvePath arg
-    complete args (AddName fullpath) c 
-complete (arg:args) (AddName path) c =
+    completeFunc args (AddName fullpath) c 
+completeFunc (arg:args) (AddName path) c =
     let c' = c {completions = Map.insert arg path (completions c)} in
         pure ("", c')
