@@ -334,8 +334,11 @@ runCommandWith out err command state =
             pure (True, state)
         "complete" -> do
             (str, nstate) <- complete (args command) Awaiting state
-            hPutStrLn out str
-            pure (True, nstate)
+            if null str then pure 
+                (True, nstate)
+            else do
+                hPutStrLn out str
+                pure (True, nstate)
         _ -> do
             result <- findExecutable (cmd command)
             case result of
