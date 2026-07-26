@@ -87,7 +87,7 @@ handleCompletion input prev state = do
                     hFlush stdout
                     loop input OtherKey state
                 ([one], _) -> do
-                    replaceToken command (one ++ "")
+                    replaceToken command (one ++ " ")
                     loop (one ++ " ") OtherKey state
                 (_, OtherKey) -> do
                     putChar '\x07'
