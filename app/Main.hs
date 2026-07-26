@@ -378,13 +378,14 @@ runCommandWith out err command state =
                     hPutStrLn out $ cmd command ++ ": command not found"
             pure (True, state)
 
-data CompleteMode = Awaiting | Print | AddPath | AddName String
+data CompleteMode = Awaiting | Print | AddPath | AddName String | Remove
 completeFunc :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
 completeFunc [] _ c = pure ("complete: not enough args provided", c)
 completeFunc (arg:args) Awaiting c = 
     case arg of
         "-p" -> completeFunc args Print c
         "-C" -> completeFunc args AddPath c
+        "-r" -> completeFunc args Remove c
         _ -> pure ("complete: " ++ arg ++ ": invalid arg", c)
 completeFunc (arg:args) Print c =
     let x = Map.lookup arg (completions c) in
@@ -396,4 +397,7 @@ completeFunc (arg:args) AddPath c = do
     completeFunc args (AddName fullpath) c 
 completeFunc (arg:args) (AddName path) c =
     let c' = c {completions = Map.insert arg path (completions c)} in
+        pure ("", c')
+completeFunc (arg:args) Remove c =
+    let c' = c {completions = Map.delete arg (completions c)} in
         pure ("", c')
