@@ -14,6 +14,7 @@ import GHC.IO.Handle.Types (Handle__)
 import GHC.IO.Handle.Internals (flushBuffer)
 import System.Environment (lookupEnv)
 import Control.Monad 
+import Data.Maybe (isJust)
 
 newtype ShellState = ShellState {completions :: Map.Map String FilePath}
 
@@ -62,7 +63,14 @@ loop buf prev state = do
             hFlush stdout
             loop (buf ++ [ch]) OtherKey state
 
-
+replaceToken :: String -> String -> IO ()
+replaceToken old new = do
+    putStr (replicate (length old) '\b')
+    putStr (replicate (length old) ' ')
+    putStr (replicate (length old) '\b')
+    putStr new
+    hFlush stdout
+    
 handleCompletion :: String -> KeyType -> ShellState -> IO ()
 handleCompletion input prev state = do
     let wds=  words input
@@ -79,19 +87,13 @@ handleCompletion input prev state = do
                     hFlush stdout
                     loop input OtherKey state
                 ([one], _) -> do
-                    let current_length = length input
-                        to_put = drop current_length one
-                    putStr $ to_put ++ " "
-                    hFlush stdout
+                    replaceToken command (one ++ "")
                     loop (one ++ " ") OtherKey state
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
-                    let current_length = length input
-                        complete = longestCommonPrefix matches
-                        to_put = drop current_length complete
-                    putStr to_put
-                    hFlush stdout
+                    let complete = longestCommonPrefix matches
+                    replaceToken command (longestCommonPrefix matches)
                     loop complete TabKey state
                 (_, TabKey) -> do
                     putChar '\n'
@@ -101,9 +103,16 @@ handleCompletion input prev state = do
                     hFlush stdout
                     loop input TabKey state
         _ -> do
+
             let wd = last allwords
+            let pre_wd = last (drop 1 allwords)
+            
             let (_, fileName) = splitFileName wd
-            matches <- getCompletedFiles wd
+            matches <- case getCompletions allwords Nothing state of
+                    Nothing -> getCompletedFiles wd
+                    Just (str, path) -> getCompletionOutput path 
+
+
             case (matches, prev) of
                 ([], _) -> do
                     putChar '\x07'
@@ -133,6 +142,16 @@ handleCompletion input prev state = do
                     hFlush stdout
                     loop input TabKey state
 
+getCompletions :: [String] -> Maybe (String, FilePath) -> ShellState -> Maybe (String, FilePath)
+getCompletions [] x _ = x
+getCompletions (x:xs) cur c =
+    case Map.lookup x (completions c) of
+        Just y -> getCompletions xs (pure (x, y)) c
+        Nothing -> getCompletions xs cur c
+
+getCompletionOutput :: FilePath -> String -> String -> String -> [String]
+getCompletionOutput path cur prev comp =
+    
 
 isDir :: String -> IO Bool
 isDir ('/':path) =
@@ -140,6 +159,7 @@ isDir ('/':path) =
 isDir path = do
     cwd <- getCurrentDirectory
     doesDirectoryExist (cwd </> path)
+
 
 getCompletedFiles :: String -> IO [FilePath]
 getCompletedFiles path = do
@@ -370,11 +390,7 @@ complete (arg:args) Print c =
             Just y -> pure ("complete -C \'" ++ y ++ "\' " ++ arg, c )
 complete (arg:args) AddPath c = do
     fullpath <- resolvePath arg
-    let isExec = True
-    if isExec then 
-        complete args (AddName fullpath) c 
-    else
-        pure ("complete: " ++ arg ++ ": invalid filepath", c)
+    complete args (AddName fullpath) c 
 complete (arg:args) (AddName path) c =
     let c' = c {completions = Map.insert arg path (completions c)} in
         pure ("", c')
