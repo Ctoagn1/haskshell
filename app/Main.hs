@@ -105,7 +105,7 @@ handleCompletion input prev state = do
         _ -> do
 
             let wd = last allwords
-            let pre_wd = last (drop 1 allwords)
+            let pre_wd = last (init allwords)
             
             let (_, fileName) = splitFileName wd
             matches <- case getCompletions allwords Nothing state of
