@@ -8,13 +8,14 @@ import System.Posix.Terminal
 import System.Posix.IO (stdInput)
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
 import Data.List (isPrefixOf, nub, intercalate, sort)
+import qualified Data.Map as Map
 import System.FilePath ((</>), splitSearchPath, splitFileName)
 import GHC.IO.Handle.Types (Handle__)
 import GHC.IO.Handle.Internals (flushBuffer)
 import System.Environment (lookupEnv)
 import Control.Monad 
 
-
+newtype ShellState = ShellState {completions :: Map.Map String FilePath}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -22,7 +23,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey
+    loop "" OtherKey ShellState {completions = Map.empty}
 
 
 
@@ -32,42 +33,42 @@ enableRawMode = do
     let raw = foldl withoutMode old [EnableEcho, ProcessInput, KeyboardInterrupts, StartStopOutput]
     setTerminalAttributes stdInput raw Immediately
     pure old
-loop :: String -> KeyType -> IO ()
-loop buf prev= do 
+loop :: String -> KeyType -> ShellState -> IO ()
+loop buf prev state = do 
     ch <- getChar
     case ch of
         '\n' -> do
             if null buf then do 
                 putStr "\n$ "
                 hFlush stdout
-                loop "" OtherKey 
+                loop "" OtherKey state
             else do
                 putChar '\n'
-                continue <- runCommand(commandParse(tokenize buf))
+                (continue, nstate) <- runCommand (commandParse (tokenize buf)) state
                 if continue then do
                     putStr "$ "
                     hFlush stdout
-                    loop "" OtherKey
+                    loop "" OtherKey nstate
                 else pure ()
         '\t' -> do 
-            handleCompletion buf prev
+            handleCompletion buf prev state
             
-        '\DEL' -> if null buf then loop buf OtherKey else do
+        '\DEL' -> if null buf then loop buf OtherKey state else do
             putStr "\b  \b\b"
             hFlush stdout
-            loop (init buf) OtherKey
+            loop (init buf) OtherKey state 
         _ -> do
             putChar ch
             hFlush stdout
-            loop (buf ++ [ch]) OtherKey
+            loop (buf ++ [ch]) OtherKey state
 
 
-handleCompletion :: String -> KeyType -> IO ()
-handleCompletion input prev = do
+handleCompletion :: String -> KeyType -> ShellState -> IO ()
+handleCompletion input prev state = do
     let wds=  words input
     let allwords = if last input == ' ' then wds ++ [""] else wds
     case allwords of
-        [] -> loop input OtherKey
+        [] -> loop input OtherKey state
         [command] -> do
             executables <- getExecutablesFromPATH
             let names = nub (builtinNames ++ executables)
@@ -76,13 +77,13 @@ handleCompletion input prev = do
                 ([], _) -> do
                     putChar '\x07'
                     hFlush stdout
-                    loop input OtherKey
+                    loop input OtherKey state
                 ([one], _) -> do
                     let current_length = length input
                         to_put = drop current_length one
                     putStr $ to_put ++ " "
                     hFlush stdout
-                    loop (one ++ " ") OtherKey
+                    loop (one ++ " ") OtherKey state
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
@@ -91,14 +92,14 @@ handleCompletion input prev = do
                         to_put = drop current_length complete
                     putStr to_put
                     hFlush stdout
-                    loop complete TabKey
+                    loop complete TabKey state
                 (_, TabKey) -> do
                     putChar '\n'
                     putStr $ intercalate "\t" (sort matches)
                     putChar '\n'
                     putStr $ "$ " ++ input
                     hFlush stdout
-                    loop input TabKey
+                    loop input TabKey state
         _ -> do
             let wd = last allwords
             let (_, fileName) = splitFileName wd
@@ -107,14 +108,14 @@ handleCompletion input prev = do
                 ([], _) -> do
                     putChar '\x07'
                     hFlush stdout
-                    loop input OtherKey
+                    loop input OtherKey state
                 ([one], _) -> do
                     let current_length = length fileName
                         to_put = drop current_length one
                     let ch = if last one == '/' then "" else " "
                     putStr $ to_put ++ ch
                     hFlush stdout
-                    loop (input ++ to_put ++ ch) OtherKey
+                    loop (input ++ to_put ++ ch) OtherKey state
                 (_, OtherKey) -> do
                     putChar '\x07'
                     hFlush stdout
@@ -123,14 +124,14 @@ handleCompletion input prev = do
                         to_put = drop current_length complete
                     putStr to_put
                     hFlush stdout
-                    loop (input ++ to_put) TabKey
+                    loop (input ++ to_put) TabKey state
                 (_, TabKey) -> do
                     putChar '\n'
                     putStr $ intercalate "\t" (sort matches)
                     putChar '\n'
                     putStr $ "$ " ++ input
                     hFlush stdout
-                    loop input TabKey
+                    loop input TabKey state
 
 
 isDir :: String -> IO Bool
@@ -143,8 +144,7 @@ isDir path = do
 getCompletedFiles :: String -> IO [FilePath]
 getCompletedFiles path = do
     let (dir, file) = splitFileName path
-    cwd <- getCurrentDirectory
-    let newDir = if "/" `isPrefixOf` dir then cwd </> dir else dir
+    newDir <- resolvePath dir
     dirExists <- doesDirectoryExist newDir
     if dirExists then do
         files <- getDirectoryContents newDir
@@ -199,6 +199,15 @@ executablesInDir dir = do
             files <- listDirectory dir
             filterM (isExecutable . (dir </>)) files
 
+resolvePath :: FilePath -> IO FilePath
+resolvePath path 
+    | "/" `isPrefixOf` path = pure path
+    | "~/" `isPrefixOf` path = do
+            hd <- getHomeDirectory
+            pure (hd </> drop 2 path)
+    | otherwise = do
+            cwd <- getCurrentDirectory
+            pure (cwd </> path)
 
 isExecutable :: FilePath -> IO Bool
 isExecutable path = do
@@ -278,38 +287,39 @@ commandParse input =
                         _ -> go xs (args ++ [x]) redirect Norm
                 Redir mode -> go xs args (Just (mode, x)) Norm
 
-runCommand :: Command -> IO Bool
-runCommand command =
+runCommand :: Command -> ShellState -> IO (Bool, ShellState)
+runCommand command state=
     case redirect command of
-        Nothing -> runCommandWith stdout stderr command
+        Nothing -> runCommandWith stdout stderr command state
         Just (OutWrite, t) -> do
-            path <- expandHome t
+            path <- resolvePath t
             withFile path WriteMode $ \h ->
-                runCommandWith h stderr command
+                runCommandWith h stderr command state
         Just (ErrWrite, t) -> do
-            path <- expandHome t
+            path <- resolvePath t
             withFile path WriteMode $ \h ->
-                runCommandWith stdout h command
+                runCommandWith stdout h command state
         Just (OutAppend, t) -> do
-            path <- expandHome t
+            path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith h stderr command
+                runCommandWith h stderr command state
         Just (ErrAppend, t) -> do
-            path <- expandHome t
+            path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith stdout h command
-runCommandWith :: Handle -> Handle -> Command -> IO Bool
-runCommandWith out err command = 
+                runCommandWith stdout h command state
+                
+runCommandWith :: Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState)
+runCommandWith out err command state = 
     case cmd command of
         "exit" ->
-            pure False
+            pure (False, state)
         "pwd" -> do
             cwd <- getCurrentDirectory
             hPutStrLn out cwd
-            pure True
+            pure (True, state)
         "echo" -> do
             hPutStrLn out (unwords (args command))
-            pure True
+            pure (True, state)
         "type" -> do
             let arg = unwords (args command)
             if isBuiltin arg
@@ -321,10 +331,11 @@ runCommandWith out err command =
                         hPutStrLn out $ arg ++ " is " ++ fullPath
                     Nothing ->
                         hPutStrLn out $ arg ++ ": not found"
-            pure True
+            pure (True, state)
         "complete" -> do
-            hPutStrLn out (complete (args command) Awaiting)
-            pure True
+            (str, nstate) <- complete (args command) Awaiting state
+            hPutStrLn out str
+            pure (True, nstate)
         _ -> do
             result <- findExecutable (cmd command)
             case result of
@@ -339,26 +350,28 @@ runCommandWith out err command =
                     pure ()
                 Nothing ->
                     hPutStrLn out $ cmd command ++ ": command not found"
-            pure True
+            pure (True, state)
 
-data CompleteMode = Awaiting | Print | Add
-complete :: [String] -> CompleteMode -> String
-complete [] _ = "complete: not enough args provided"
-complete (arg:args) Awaiting = 
+data CompleteMode = Awaiting | Print | AddPath | AddName String
+complete :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
+complete [] _ c = pure ("complete: not enough args provided", c)
+complete (arg:args) Awaiting c = 
     case arg of
-        "-p" -> complete args Print
-        "-C" -> complete args Add
-        _ -> "complete: " ++ arg ++ ": invalid arg"
-complete (arg:args) Print =
-    "complete: " ++ arg ++ ": no completion specification"
-
-
-expandHome :: FilePath -> IO FilePath
-expandHome path
-  | path == "~" =
-      getHomeDirectory
-  | "~/" `isPrefixOf` path = do
-      home <- getHomeDirectory
-      pure (home </> drop 2 path)
-  | otherwise =
-      pure path
+        "-p" -> complete args Print c
+        "-C" -> complete args AddPath c
+        _ -> pure ("complete: " ++ arg ++ ": invalid arg", c)
+complete (arg:args) Print c =
+    let x = Map.lookup arg (completions c) in
+        case x of
+            Nothing -> pure ("complete: " ++ arg ++ ": no completion specification", c)
+            Just y -> pure ("complete -C \'" ++ y ++ "\' " ++ arg, c )
+complete (arg:args) AddPath c = do
+    fullpath <- resolvePath arg
+    isExec <- isExecutable fullpath
+    if isExec then 
+        complete args (AddName fullpath) c 
+    else
+        pure ("complete: " ++ arg ++ ": invalid filepath", c)
+complete (arg:args) (AddName path) c =
+    let c' = c {completions = Map.insert arg path (completions c)} in
+        pure ("", c')
