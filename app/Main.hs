@@ -278,9 +278,9 @@ tokenize path =
                 Backslash last_state ->
                     go cs (current ++ [c]) tokens last_state
 
-data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String)}
+data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String), isBgJob :: Bool}
 data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 
-data ParseMode = Redir Redirect | Norm
+data ParseMode = Redir Redirect | Norm | Bg
 commandParse :: [String] -> Command
 commandParse input = 
     
