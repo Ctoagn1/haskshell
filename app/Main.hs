@@ -12,7 +12,7 @@ import qualified Data.Map as Map
 import System.FilePath ((</>), splitSearchPath, splitFileName)
 import GHC.IO.Handle.Types (Handle__)
 import GHC.IO.Handle.Internals (flushBuffer)
-import System.Environment (lookupEnv)
+import System.Environment (lookupEnv, setEnv)
 import Control.Monad 
 import Data.Maybe (isJust)
 
@@ -108,6 +108,8 @@ handleCompletion input prev state = do
             let pre_wd = last (init allwords)
             
             let (_, fileName) = splitFileName wd
+            setEnv "COMP_LINE" input
+            setEnv "COMP_POINT" $ show (length input)
             matches <- case getCompletions allwords Nothing state of
                     Nothing -> getCompletedFiles wd
                     Just (str, path) -> getCompletionOutput path str wd pre_wd
