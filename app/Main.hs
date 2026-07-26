@@ -338,7 +338,7 @@ runCommandWith out err command state =
                 setCurrentDirectory newCwd
                 pure (True, state)
             else do
-                hPutStrLn out (arg ++ ": no such directory")
+                hPutStrLn out ("cd: " ++ arg ++ ": no such file or directory")
                 pure (True, state)
 
         "echo" -> do
