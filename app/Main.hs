@@ -1,7 +1,7 @@
 module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
-import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents)
+import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess)
 import Control.Monad.IO.Class
 import System.Posix.Terminal
@@ -226,7 +226,7 @@ executablesInDir dir = do
 resolvePath :: FilePath -> IO FilePath
 resolvePath path 
     | "/" `isPrefixOf` path = pure path
-    | "~/" `isPrefixOf` path = do
+    | "~" `isPrefixOf` path = do
             hd <- getHomeDirectory
             pure (hd </> drop 2 path)
     | otherwise = do
@@ -245,7 +245,7 @@ isBuiltin cmd =
   cmd `elem` builtinNames
 
 builtinNames =
-  ["exit", "echo", "type", "pwd", "complete"]
+  ["exit", "echo", "type", "pwd", "complete", "cd", "jobs"]
 
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
@@ -277,16 +277,6 @@ tokenize path =
                         _ -> go cs (current ++ [c]) tokens DoubleQuote
                 Backslash last_state ->
                     go cs (current ++ [c]) tokens last_state
-
-handleTypeCommand :: String -> IO String
-handleTypeCommand remainingArgs = case remainingArgs of
-    x | x `elem` ["exit", "echo", "type"] -> pure $ x ++ " is a shell builtin"
-    _ -> do 
-        result <- findExecutable remainingArgs
-        case result of
-            Just path -> pure $ remainingArgs ++ " is " ++ path
-            Nothing ->  pure $ remainingArgs ++ ": not found"
-
 
 data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String)}
 data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 
@@ -340,6 +330,17 @@ runCommandWith out err command state =
             cwd <- getCurrentDirectory
             hPutStrLn out cwd
             pure (True, state)
+        "cd" -> do
+            let arg = unwords (args command)
+            newCwd <- resolvePath arg
+            isDir <- doesDirectoryExist newCwd
+            if isDir then do
+                setCurrentDirectory newCwd
+                pure (True, state)
+            else do
+                hPutStrLn out (arg ++ ": no such directory")
+                pure (True, state)
+
         "echo" -> do
             hPutStrLn out (unwords (args command))
             pure (True, state)
@@ -362,6 +363,8 @@ runCommandWith out err command state =
             else do
                 hPutStrLn out str
                 pure (True, nstate)
+        "jobs" -> do
+            pure (True, state)
         _ -> do
             result <- findExecutable (cmd command)
             case result of
