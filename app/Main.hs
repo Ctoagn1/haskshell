@@ -2,7 +2,7 @@ module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
-import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess, ProcessHandle, getPid)
+import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess, ProcessHandle, getPid, getProcessExitCode)
 import Control.Monad.IO.Class
 import System.Posix.Terminal
 import System.Posix.IO (stdInput)
@@ -17,9 +17,10 @@ import Control.Monad
 import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 
-data ProcStatus = Running 
+data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
+    show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
 data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobId :: Int, secondLatestJobId :: Int}
 
@@ -370,12 +371,24 @@ runCommandWith out err command state =
                 hPutStrLn out str
                 pure (True, nstate)
         "jobs" -> do
-            let jobList = Map.toList (bgJobs state)
+            jobList <- mapM (\(id, procInfo) -> do
+                    exit_code <- getProcessExitCode (handle procInfo)
+                    case exit_code of
+                        Nothing -> pure (id, procInfo)
+                        Just _ -> pure (id, procInfo {status = Done})
+                    ) (Map.toList (bgJobs state))
+                    
             let addPlus num = if num == latestJobId state then "+" else 
                     if num == secondLatestJobId state then "-" else ""
+            let addAnd status = if status == Running then " &" else ""
+
             mapM_ (\(jobNum, procState) -> 
-                hPutStrLn out $ "[" ++ show jobNum ++ "]" ++ addPlus jobNum ++ "  " ++ show (status procState) ++ name procState ) jobList
-            pure (True, state)
+                hPutStrLn out $ "[" ++ show jobNum ++ "]" ++ 
+                    addPlus jobNum ++ "  " ++ show (status procState) 
+                    ++ name procState ++ addAnd (status procState) ) jobList
+            let state' = state {bgJobs = Map.fromList (filter (\(_, procInfo) -> status procInfo == Running ) jobList)}
+            pure (True, state')
+
         _ -> do
             result <- findExecutable (cmd command)
             state' <- case result of
