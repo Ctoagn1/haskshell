@@ -391,7 +391,7 @@ runCommandWith inp out err command state =
             let num = readMaybe arg :: Maybe Int
             case num of
                 Nothing -> putStr $ showHistory (history state) 1
-                Just x -> putStr $ showHistory (drop (max 0 (length (history state) - x)) (history state)) 1
+                Just x -> putStr $ showHistory (drop (max 0 (length (history state) - x)) (history state)) (max 1 (length (history state) - x) )
             pure (True, state)
         _ -> do
             result <- findExecutable (cmd command) 
