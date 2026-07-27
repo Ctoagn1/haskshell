@@ -1,6 +1,6 @@
 module Main (main) where
 
-import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL), stdin, hReady)
+import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL), stdin, hReady, hPutStr)
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd, std_in), StdStream (UseHandle, Inherit), readProcess, ProcessHandle, getPid, getProcessExitCode)
 import Control.Monad.IO.Class
@@ -421,7 +421,7 @@ runCommandWith inp out err command state =
             pure (True, state')
         "history" -> do
             (s, state') <- getHistory (args command) HistoryNormal state
-            hPutStrLn out s
+            hPutStr out s
             pure (True, state')
         _ -> do
             result <- findExecutable (cmd command) 
