@@ -22,7 +22,7 @@ instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
     show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobId :: Int, secondLatestJobId :: Int}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int]}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -30,7 +30,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobId = 0, secondLatestJobId = 0}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = []}
 
 
 
@@ -377,16 +377,14 @@ runCommandWith out err command state =
                         Nothing -> pure (id, procInfo)
                         Just _ -> pure (id, procInfo {status = Done})
                     ) (Map.toList (bgJobs state))
-                    
-            let addPlus num = if num == latestJobId state then "+" else 
-                    if num == secondLatestJobId state then "-" else ""
             let addAnd status = if status == Running then " &" else ""
-
+                droppedIds = map fst (filter (\(id, procInfo) -> status procInfo /= Running) jobList)
+                newIdList = filter (`notElem` droppedIds) (latestJobIds state) 
             mapM_ (\(jobNum, procState) -> 
                 hPutStrLn out $ "[" ++ show jobNum ++ "]" ++ 
-                    addPlus jobNum ++ "  " ++ show (status procState) 
+                    addPlus jobNum (latestJobIds state) ++ "  " ++ show (status procState) 
                     ++ name procState ++ addAnd (status procState) ) jobList
-            let state' = state {bgJobs = Map.fromList (filter (\(_, procInfo) -> status procInfo == Running ) jobList)}
+            let state' = state {bgJobs = Map.fromList (filter (\(_, procInfo) -> status procInfo == Running ) jobList), latestJobIds = newIdList}
             pure (True, state')
 
         _ -> do
@@ -404,17 +402,24 @@ runCommandWith out err command state =
                         let osPid = maybe "unknown" show pid
                             j_id = nextJobId state
                             procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
-                            state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, secondLatestJobId = latestJobId state, latestJobId = j_id}
+                            state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobIds = j_id:latestJobIds state}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
                         pure state'
                     else do
                         _ <- waitForProcess processHandle
-                        let state' = state
                         pure state
                 Nothing -> do
                     hPutStrLn out $ cmd command ++ ": command not found"
                     pure state
             pure (True, state')
+
+addPlus :: Int -> [Int] -> String
+addPlus _ [] = ""
+addPlus y [x] = if y == x then "+" else ""
+addPlus z (x:y:xs) 
+    | z == x = "+"
+    | z == y = "-"
+    | otherwise = ""
 
 data CompleteMode = Awaiting | Print | AddPath | AddName String | Remove
 completeFunc :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
