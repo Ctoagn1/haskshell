@@ -17,7 +17,11 @@ import Control.Monad
 import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcessHandle, nextJobId :: Int}
+data ProcStatus = Running 
+instance Show ProcStatus where
+    show Running = "Running" ++ replicate 17 ' '
+data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobId :: Int}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -25,7 +29,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobId = 0}
 
 
 
@@ -366,10 +370,14 @@ runCommandWith out err command state =
                 hPutStrLn out str
                 pure (True, nstate)
         "jobs" -> do
+            let jobList = Map.toList (bgJobs state)
+            let addPlus num = if num == latestJobId state then "+" else ""
+            mapM_ (\(jobNum, procState) -> 
+                hPutStrLn out $ "[" ++ show jobNum ++ "]" ++ addPlus jobNum ++ "  " ++ show (status procState) ++ name procState ) jobList
             pure (True, state)
         _ -> do
             result <- findExecutable (cmd command)
-            case result of
+            state' <- case result of
                 Just fullPath -> do
                     (_, _, _, processHandle) <-
                         createProcess
@@ -381,14 +389,18 @@ runCommandWith out err command state =
                         pid <- getPid processHandle
                         let osPid = maybe "unknown" show pid
                             j_id = nextJobId state
-                            state' = state {bgJobs = Map.insert j_id processHandle (bgJobs state), nextJobId = j_id + 1}
+                            procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
+                            state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobId = j_id}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
+                        pure state'
                     else do
                         _ <- waitForProcess processHandle
-                        pure ()
-                Nothing ->
+                        let state' = state
+                        pure state
+                Nothing -> do
                     hPutStrLn out $ cmd command ++ ": command not found"
-            pure (True, state)
+                    pure state
+            pure (True, state')
 
 data CompleteMode = Awaiting | Print | AddPath | AddName String | Remove
 completeFunc :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
