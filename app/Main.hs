@@ -48,6 +48,7 @@ loop buf prev state = do
             if null buf then do
                 (out, state') <- reapBeforePrompt state
                 putStr $ unlines out
+                hFlush stdout
                 putStr "\n$ "
                 hFlush stdout
                 loop "" OtherKey state'
@@ -57,6 +58,7 @@ loop buf prev state = do
                 if continue then do
                     (out, state') <- reapBeforePrompt nstate
                     putStr $ unlines out
+                    hFlush stdout
                     putStr "$ "
                     hFlush stdout
                     loop "" OtherKey state'
