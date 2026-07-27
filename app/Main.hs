@@ -2,7 +2,7 @@ module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
-import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess)
+import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess, ProcessHandle, getPid)
 import Control.Monad.IO.Class
 import System.Posix.Terminal
 import System.Posix.IO (stdInput)
@@ -15,8 +15,9 @@ import GHC.IO.Handle.Internals (flushBuffer)
 import System.Environment (lookupEnv, setEnv)
 import Control.Monad 
 import Data.Maybe (isJust)
+import System.Process.Internals (ProcessHandle__)
 
-newtype ShellState = ShellState {completions :: Map.Map String FilePath}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcessHandle, nextJobId :: Int}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -24,7 +25,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1}
 
 
 
@@ -286,7 +287,8 @@ commandParse input =
     
     go input [] Nothing Norm
     where 
-        go [] args redirect _ = Command {cmd = head args, args = tail args, redirect = redirect}
+        go [] args redirect _ = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = False}
+        go ["&"] args redirect Norm  = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = True}
         go (x:xs) args redirect mode = 
             case mode of 
                 Norm ->
@@ -375,8 +377,15 @@ runCommandWith out err command state =
                             { std_out = UseHandle out,
                             std_err = UseHandle err
                             }
-                    _ <- waitForProcess processHandle
-                    pure ()
+                    if isBgJob command then do
+                        pid <- getPid processHandle
+                        let osPid = maybe "unknown" show pid
+                            j_id = nextJobId state
+                            state' = state {bgJobs = Map.insert j_id processHandle (bgJobs state), nextJobId = j_id + 1}
+                        putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
+                    else do
+                        _ <- waitForProcess processHandle
+                        pure ()
                 Nothing ->
                     hPutStrLn out $ cmd command ++ ": command not found"
             pure (True, state)
