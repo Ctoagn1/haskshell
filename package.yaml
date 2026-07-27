@@ -17,7 +17,6 @@ dependencies:
   - filepath
   - unix
   - containers
-  - split
 
 executables:
   codecrafters-shell-exe:
