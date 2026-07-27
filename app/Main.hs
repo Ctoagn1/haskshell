@@ -45,17 +45,21 @@ loop buf prev state = do
     ch <- getChar
     case ch of
         '\n' -> do
-            if null buf then do 
+            if null buf then do
+                (out, state') <- reapBeforePrompt state
+                putStr $ unlines out
                 putStr "\n$ "
                 hFlush stdout
-                loop "" OtherKey state
+                loop "" OtherKey state'
             else do
                 putChar '\n'
                 (continue, nstate) <- runCommand (commandParse (tokenize buf)) state
                 if continue then do
+                    (out, state') <- reapBeforePrompt nstate
+                    putStr $ unlines out
                     putStr "$ "
                     hFlush stdout
-                    loop "" OtherKey nstate
+                    loop "" OtherKey state'
                 else pure ()
         '\t' -> do 
             handleCompletion buf prev state
@@ -161,6 +165,7 @@ getCompletionOutput :: FilePath -> String -> String -> String -> IO [String]
 getCompletionOutput path comp cur prev = do
     output <- readProcess path [comp, cur, prev] ""
     pure $ lines output
+
 
 
 isDir :: String -> IO Bool
@@ -371,22 +376,13 @@ runCommandWith out err command state =
                 hPutStrLn out str
                 pure (True, nstate)
         "jobs" -> do
-            jobList <- mapM (\(id, procInfo) -> do
-                    exit_code <- getProcessExitCode (handle procInfo)
-                    case exit_code of
-                        Nothing -> pure (id, procInfo)
-                        Just _ -> pure (id, procInfo {status = Done})
-                    ) (Map.toList (bgJobs state))
+            state' <- reapJobs state
             let addAnd status = if status == Running then " &" else ""
-                droppedIds = map fst (filter (\(id, procInfo) -> status procInfo /= Running) jobList)
-                newIdList = filter (`notElem` droppedIds) (latestJobIds state) 
             mapM_ (\(jobNum, procState) -> 
                 hPutStrLn out $ "[" ++ show jobNum ++ "]" ++ 
                     addPlus jobNum (latestJobIds state) ++ "  " ++ show (status procState) 
-                    ++ name procState ++ addAnd (status procState) ) jobList
-            let state' = state {bgJobs = Map.fromList (filter (\(_, procInfo) -> status procInfo == Running ) jobList), latestJobIds = newIdList}
+                    ++ name procState ++ addAnd (status procState) ) (Map.toList (bgJobs state'))
             pure (True, state')
-
         _ -> do
             result <- findExecutable (cmd command)
             state' <- case result of
@@ -413,6 +409,20 @@ runCommandWith out err command state =
                     pure state
             pure (True, state')
 
+reapJobs :: ShellState -> IO ShellState 
+reapJobs state = do
+    jobList <- mapM (\(id, procInfo) -> do
+        exit_code <- getProcessExitCode (handle procInfo)
+        case exit_code of
+            Nothing -> pure (id, procInfo)
+            Just _ -> pure (id, procInfo {status = Done})
+        ) (Map.toList (bgJobs state))
+    let addAnd status = if status == Running then " &" else ""
+        droppedIds = map fst (filter (\(id, procInfo) -> status procInfo /= Running) jobList)
+        newIdList = filter (`notElem` droppedIds) (latestJobIds state) 
+        state' = state {bgJobs = Map.fromList (filter (\(_, procInfo) -> status procInfo == Running ) jobList), latestJobIds = newIdList}
+    pure state'
+
 addPlus :: Int -> [Int] -> String
 addPlus _ [] = ""
 addPlus y [x] = if y == x then "+" else ""
@@ -420,6 +430,13 @@ addPlus z (x:y:xs)
     | z == x = "+"
     | z == y = "-"
     | otherwise = ""
+
+reapBeforePrompt :: ShellState -> IO ([String], ShellState)
+reapBeforePrompt state = do 
+    state' <- reapJobs state
+    let doneJobs = filter (\(id, info) -> status info == Done) (Map.toList (bgJobs state'))
+    pure (map (\(jobNum, procState) -> "[" ++ show jobNum ++ "]" ++ addPlus jobNum (latestJobIds state) ++ "  " ++ show (status procState) 
+        ++ name procState) doneJobs, state')
 
 data CompleteMode = Awaiting | Print | AddPath | AddName String | Remove
 completeFunc :: [String] -> CompleteMode -> ShellState -> IO (String, ShellState)
