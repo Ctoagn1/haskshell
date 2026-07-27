@@ -389,7 +389,7 @@ runCommandWith out err command state =
                     if isBgJob command then do
                         pid <- getPid processHandle
                         let osPid = maybe "unknown" show pid
-                            j_id = if Map.null (bgJobs state) then nextJobId state else 1
+                            j_id = if Map.null (bgJobs state) then 1 else nextJobId state
                             procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
                             state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobIds = j_id:latestJobIds state}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
