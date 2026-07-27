@@ -21,7 +21,7 @@ data ProcStatus = Running
 instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobId :: Int}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobId :: Int, secondLatestJobId :: Int}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -29,7 +29,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobId = 0}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobId = 0, secondLatestJobId = 0}
 
 
 
@@ -371,7 +371,8 @@ runCommandWith out err command state =
                 pure (True, nstate)
         "jobs" -> do
             let jobList = Map.toList (bgJobs state)
-            let addPlus num = if num == latestJobId state then "+" else ""
+            let addPlus num = if num == latestJobId state then "+" else 
+                    if num == secondLatestJobId state then "-" else ""
             mapM_ (\(jobNum, procState) -> 
                 hPutStrLn out $ "[" ++ show jobNum ++ "]" ++ addPlus jobNum ++ "  " ++ show (status procState) ++ name procState ) jobList
             pure (True, state)
@@ -390,7 +391,7 @@ runCommandWith out err command state =
                         let osPid = maybe "unknown" show pid
                             j_id = nextJobId state
                             procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
-                            state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobId = j_id}
+                            state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, secondLatestJobId = latestJobId state, latestJobId = j_id}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
                         pure state'
                     else do
