@@ -1,6 +1,6 @@
 module Main (main) where
 
-import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL), stdin)
+import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL), stdin, hReady)
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
 import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd, std_in), StdStream (UseHandle, Inherit), readProcess, ProcessHandle, getPid, getProcessExitCode)
 import Control.Monad.IO.Class
@@ -23,7 +23,7 @@ instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
     show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String]}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -31,7 +31,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = []}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0}
 
 
 
@@ -53,7 +53,7 @@ loop buf prev state = do
                 loop "" OtherKey state'
             else do
                 putChar '\n'
-                let s = state {history = history state ++ [buf]}
+                let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1 }
                 (continue, nstate) <- runCommand (commandParse (tokenize buf)) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
@@ -68,6 +68,15 @@ loop buf prev state = do
             putStr "\b  \b\b"
             hFlush stdout
             loop (init buf) OtherKey state 
+        '\ESC' -> do
+            is_an_arrow <- hReady stdin
+            when is_an_arrow $ do
+                c2 <- getChar
+                c3 <- getChar
+                case (c2, c3) of
+                    ('[', 'A' ) -> handleUpArrow buf state
+                    ('[', 'B') -> handleDownArrow buf state
+                    _ -> loop buf OtherKey state
         _ -> do
             putChar ch
             hFlush stdout
@@ -80,6 +89,30 @@ replaceToken old new = do
     putStr (replicate (length old) '\b')
     putStr new
     hFlush stdout
+
+handleUpArrow :: String -> ShellState -> IO ()
+handleUpArrow buf state = do
+    let newpos = max 0 (historyPosition state - 1)
+        s = state {historyPosition = newpos}
+    if newpos < length (history state) then do
+        let new = history state !! newpos
+        replaceToken buf new
+        loop new OtherKey s
+    else do
+        replaceToken buf ""
+        loop "" OtherKey s
+
+handleDownArrow :: String -> ShellState -> IO ()
+handleDownArrow buf state = do
+    let newpos = min (length (history state)) (historyPosition state + 1)
+        s = state {historyPosition = newpos}
+    if newpos < length (history state) then do
+        let new = history state !! newpos
+        replaceToken buf new
+        loop new OtherKey s
+    else do
+        replaceToken buf ""
+        loop "" OtherKey s
     
 handleCompletion :: String -> KeyType -> ShellState -> IO ()
 handleCompletion input prev state = do
