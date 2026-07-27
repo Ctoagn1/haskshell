@@ -1,8 +1,8 @@
 module Main (main) where
 
-import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL))
+import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL), stdin)
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
-import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd), StdStream (UseHandle), readProcess, ProcessHandle, getPid, getProcessExitCode)
+import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd, std_in), StdStream (UseHandle, Inherit), readProcess, ProcessHandle, getPid, getProcessExitCode)
 import Control.Monad.IO.Class
 import System.Posix.Terminal
 import System.Posix.IO (stdInput)
@@ -16,13 +16,14 @@ import System.Environment (lookupEnv, setEnv)
 import Control.Monad 
 import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
+import Text.Read (readMaybe)
 
 data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
     show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int]}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String]}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -30,7 +31,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = []}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = []}
 
 
 
@@ -52,7 +53,8 @@ loop buf prev state = do
                 loop "" OtherKey state'
             else do
                 putChar '\n'
-                (continue, nstate) <- runCommand (commandParse (tokenize buf)) state
+                let s = state {history = history state ++ [buf]}
+                (continue, nstate) <- runCommand (commandParse (tokenize buf)) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
                     putStr "$ "
@@ -194,6 +196,11 @@ getCompletedFiles path = do
         pure []
     
             
+splitOn :: (Eq a) => a -> [a] -> [[a]]
+splitOn sep xs = case break (== sep) xs of
+  (chunk, []) -> [chunk]
+  (chunk, _ : rest) -> chunk : splitOn sep rest
+
 splitKeepTrailing :: Char -> String -> [String]
 splitKeepTrailing c s =
     go s ""
@@ -253,7 +260,7 @@ isBuiltin cmd =
   cmd `elem` builtinNames
 
 builtinNames =
-  ["exit", "echo", "type", "pwd", "complete", "cd", "jobs"]
+  ["exit", "echo", "type", "pwd", "complete", "cd", "jobs", "history"]
 
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
@@ -291,7 +298,6 @@ data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend
 data ParseMode = Redir Redirect | Norm | Bg
 commandParse :: [String] -> Command
 commandParse input = 
-    
     go input [] Nothing Norm
     where 
         go [] args redirect _ = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = False}
@@ -309,29 +315,34 @@ commandParse input =
                         _ -> go xs (args ++ [x]) redirect Norm
                 Redir mode -> go xs args (Just (mode, x)) Norm
 
+{-}
+pipeline :: [[String]] -> IO (Bool, ShellState)
+pipeline input = do
+    let commandList = map commandParse input
+-}
 runCommand :: Command -> ShellState -> IO (Bool, ShellState)
 runCommand command state=
     case redirect command of
-        Nothing -> runCommandWith stdout stderr command state
+        Nothing -> runCommandWith stdin stdout stderr command state
         Just (OutWrite, t) -> do
             path <- resolvePath t
             withFile path WriteMode $ \h ->
-                runCommandWith h stderr command state
+                runCommandWith stdin h stderr command state
         Just (ErrWrite, t) -> do
             path <- resolvePath t
             withFile path WriteMode $ \h ->
-                runCommandWith stdout h command state
+                runCommandWith stdin stdout h command state
         Just (OutAppend, t) -> do
             path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith h stderr command state
+                runCommandWith stdin h stderr command state
         Just (ErrAppend, t) -> do
             path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith stdout h command state
+                runCommandWith stdin stdout h command state
                 
-runCommandWith :: Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState)
-runCommandWith out err command state = 
+runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState)
+runCommandWith inp out err command state = 
     case cmd command of
         "exit" ->
             pure (False, state)
@@ -375,16 +386,23 @@ runCommandWith out err command state =
         "jobs" -> do
             state' <- reapJobs All state out
             pure (True, state')
-
+        "history" -> do
+            let arg = unwords (args command)
+            let num = readMaybe arg :: Maybe Int
+            case num of
+                Nothing -> putStr $ showHistory (history state) 1
+                Just x -> putStr $ showHistory (drop (max 0 (length (history state) - x)) (history state)) 1
+            pure (True, state)
         _ -> do
-            result <- findExecutable (cmd command)
+            result <- findExecutable (cmd command) 
             state' <- case result of
                 Just fullPath -> do
                     (_, _, _, processHandle) <-
                         createProcess
                         (proc (cmd command) (args command))
                             { std_out = UseHandle out,
-                            std_err = UseHandle err
+                            std_err = UseHandle err,
+                            std_in = UseHandle inp 
                             }
                     if isBgJob command then do
                         pid <- getPid processHandle
@@ -401,6 +419,11 @@ runCommandWith out err command state =
                     hPutStrLn out $ cmd command ++ ": command not found"
                     pure state
             pure (True, state')
+
+
+showHistory :: [String] -> Int -> String
+showHistory [] i = ""
+showHistory (x:xs) i = "    " ++ show i ++ "  " ++ x ++ "\n" ++ showHistory xs (i+1)
 
 data ReapMode = DoneOnly | All deriving (Eq)
 reapJobs :: ReapMode -> ShellState -> Handle -> IO ShellState
