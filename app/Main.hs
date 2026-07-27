@@ -420,12 +420,9 @@ runCommandWith inp out err command state =
             state' <- reapJobs All state out
             pure (True, state')
         "history" -> do
-            let arg = unwords (args command)
-            let num = readMaybe arg :: Maybe Int
-            case num of
-                Nothing -> putStr $ showHistory (history state) 1
-                Just x -> putStr $ showHistory (drop (max 0 (length (history state) - x)) (history state)) (max 1 (length (history state) - x) )
-            pure (True, state)
+            (s, state') <- getHistory (args command) HistoryNormal state
+            hPutStrLn out s
+            pure (True, state')
         _ -> do
             result <- findExecutable (cmd command) 
             state' <- case result of
@@ -452,6 +449,30 @@ runCommandWith inp out err command state =
                     hPutStrLn out $ cmd command ++ ": command not found"
                     pure state
             pure (True, state')
+
+data HistoryMode =  HistoryNormal | HistoryRead | HistoryWrite | HistoryAppend
+getHistory :: [String] ->  HistoryMode -> ShellState -> IO (String, ShellState)
+getHistory [] HistoryNormal state = pure (showHistory (history state) 1, state)
+getHistory [] _ state = pure ("history: not enough arguments provided", state)
+getHistory (x:xs) HistoryNormal state =
+    case x of
+        "-r" -> getHistory xs HistoryRead state
+        "-w" -> getHistory xs HistoryWrite state
+        "-a" -> getHistory xs HistoryAppend state
+        _ -> case readMaybe x :: Maybe Int  of
+                Nothing -> pure ("history: " ++ x ++ ": unrecognized argument", state)
+                Just y -> pure (showHistory (drop (max 0 (length (history state) - y)) (history state)) (max 1 (length (history state) - y) ), state)
+getHistory (x:xs) HistoryRead state = do
+    path <- resolvePath x
+    fExists <- doesFileExist path
+    if fExists then do
+        contents <- readFile path
+        let s = state {history = history state ++ lines contents}
+        pure ("", s)
+    else
+        pure ("history: " ++ x ++ ": no such file", state)
+
+
 
 
 showHistory :: [String] -> Int -> String
