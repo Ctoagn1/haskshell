@@ -17,6 +17,7 @@ import Control.Monad
 import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 import Text.Read (readMaybe)
+import System.Directory.Internal.Prelude (catchIOError, try)
 
 data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
@@ -471,6 +472,14 @@ getHistory (x:xs) HistoryRead state = do
         pure ("", s)
     else
         pure ("history: " ++ x ++ ": no such file", state)
+getHistory (x:xs) HistoryWrite state = do
+    result <- (try $ writeFile x (unlines (history state)) :: IO (Either IOError ()))
+    case result of
+        Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
+        Right _ -> pure ("", state)
+
+
+
 
 
 
