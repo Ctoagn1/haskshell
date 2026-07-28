@@ -470,6 +470,7 @@ getHistory (x:xs) HistoryRead state = do
         contents <- readFile path
         let newHistory = history state ++ lines contents
             s = state {history = newHistory, unappendedHistoryIndex = length newHistory }
+        putStrLn $ show (length newHistory)
         pure ("", s)
     else
         pure ("history: " ++ x ++ ": no such file", state)
