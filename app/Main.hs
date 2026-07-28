@@ -46,13 +46,13 @@ initializeHistory state = do
             hist <- try (readFile path) :: IO (Either IOError String)
             case hist of
                 Left _ -> pure state
-                Right text -> pure state {history = lines text}
+                Right text -> pure state {history = lines text, unappendedHistoryIndex = length (lines text)}
 
 saveHistory :: ShellState -> IO ()
 saveHistory state = do
     histfile <- lookupEnv "HISTFILE"
     case histfile of
-        Just f -> appendFile f (unlines $ history state)
+        Just f -> appendFile f (unlines $ drop (unappendedHistoryIndex state) (history state))
         Nothing -> pure ()
 
 enableRawMode :: IO TerminalAttributes
