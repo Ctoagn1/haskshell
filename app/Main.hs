@@ -18,6 +18,7 @@ import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 import Text.Read (readMaybe)
 import System.Directory.Internal.Prelude (catchIOError, try)
+import GHC.IO.Exception (IOException(IOError))
 
 data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
@@ -31,9 +32,21 @@ main :: IO ()
 main = do
     enableRawMode
     putStr "$ "
+    let init = ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0} 
+    state <- initializeHistory init
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0}
+    loop "" OtherKey state
 
+initializeHistory :: ShellState -> IO ShellState
+initializeHistory state = do
+    histPath <- lookupEnv "HISTFILE"
+    case histPath of
+        Nothing -> pure state
+        Just path -> do
+            hist <- try (readFile path) :: IO (Either IOError String)
+            case hist of
+                Left _ -> pure state
+                Right text -> pure state {history = lines text}
 
 
 enableRawMode :: IO TerminalAttributes
