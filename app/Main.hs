@@ -75,7 +75,7 @@ loop buf prev state = do
             else do
                 putChar '\n'
                 let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
-                (continue, nstate) <- runCommand (commandParse (varSub (tokenize buf) s)) s
+                (continue, nstate) <- runCommand (commandParse $ substituteVars (tokenize buf) s) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
                     putStr "$ "
@@ -340,13 +340,57 @@ isBuiltin cmd =
 builtinNames =
   ["exit", "echo", "type", "pwd", "complete", "cd", "jobs", "history", "declare"]
 
-varSub :: [String] -> ShellState -> [String] 
-varSub inp state = map (\s -> if "$" `isPrefixOf` s 
-    then do 
-        case Map.lookup (drop 1 s) (declares state) of
+data SubMode = SubNorm | SubDollar | SubOpenBrace
+substituteVars :: [String] -> ShellState -> [String]
+substituteVars inp state = map (\x ->varSub x "" "" state SubNorm) inp
+
+varSub :: String -> String -> String -> ShellState -> SubMode -> String
+varSub [] acc var_acc state _ = do
+    let v = case Map.lookup var_acc (declares state) of
             Nothing -> ""
-            Just x -> x
-    else s) inp
+            Just x -> x 
+    acc ++ v
+
+varSub (x:xs) acc var_acc state SubNorm = 
+    case x of
+        '$' -> do 
+            if not (null xs) && head xs == '{' then
+                varSub (drop 1 xs) acc var_acc state SubOpenBrace
+            else
+                varSub xs acc var_acc state SubDollar
+        _ -> varSub xs (acc ++ [x]) var_acc state SubNorm
+varSub (x:xs) acc var_acc state SubDollar =
+    case x of
+        '$' -> do
+            let v = case Map.lookup var_acc (declares state) of
+                    Nothing -> ""
+                    Just y -> y
+            if not (null xs) && head xs == '{' then
+                varSub (tail xs) (acc ++ [x]) "" state SubOpenBrace
+            else
+                varSub xs (acc ++ [x]) "" state SubDollar
+        _ -> do
+            if isAlphaNum x then 
+                varSub xs acc (var_acc ++ [x]) state SubDollar
+            else do             
+                let v = case Map.lookup var_acc (declares state) of
+                        Nothing -> ""
+                        Just y -> y
+                varSub xs (acc ++ v) "" state SubNorm
+varSub (x:xs) acc var_acc state SubOpenBrace = 
+    case x of
+        '}' -> do
+            let v = case Map.lookup var_acc (declares state) of
+                    Nothing -> ""
+                    Just y -> y
+            varSub xs (acc ++ v) "" state SubNorm
+        _ -> varSub xs acc (var_acc ++ [x]) state SubOpenBrace
+        
+
+            
+
+
+
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
 tokenize :: String -> [String]
