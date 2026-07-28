@@ -17,22 +17,23 @@ import Control.Monad
 import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 import Text.Read (readMaybe)
-import System.Directory.Internal.Prelude (catchIOError, try)
+import System.Directory.Internal.Prelude (catchIOError, try, isAlpha)
 import GHC.IO.Exception (IOException(IOError))
+import Data.Char (isAlphaNum)
 
 data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
     show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int, unappendedHistoryIndex :: Int}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int, unappendedHistoryIndex :: Int, declares :: Map.Map String String }
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
 main = do
     enableRawMode
     putStr "$ "
-    let init = ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0} 
+    let init = ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0, declares = Map.empty} 
     state <- initializeHistory init
     hFlush stdout
     loop "" OtherKey state
@@ -229,6 +230,28 @@ isDir path = do
     cwd <- getCurrentDirectory
     doesDirectoryExist (cwd </> path)
 
+declareVar :: ShellState -> [String] -> (String, ShellState)
+declareVar state []  = ("declare: not enough args provided", state)
+declareVar state ("-p":xs) = do
+    if null xs then ("declare: not enough args provided", state) else do
+        let var = head xs
+            entry = Map.lookup var (declares state)
+        case entry of
+            Nothing -> ("declare:" ++ var ++ ": not found", state)
+            Just x -> ("declare -- " ++ var ++ "=\"x\"", state)
+declareVar state (x:xs) = do
+    let inp = splitOn '=' x
+    if length inp /= 2 || not (validIdentifier $ head inp) then 
+        ("declare: " ++ x ++ ": not a valid identifier", state) 
+    else
+        ("", state {declares = Map.insert (head inp) (last inp) (declares state)})
+
+
+validIdentifier :: String -> Bool
+validIdentifier [] = False
+validIdentifier (x:xs) =
+    (isAlpha x || x == '_') && all (\x -> isAlphaNum x || x == '_') xs
+
 
 getCompletedFiles :: String -> IO [FilePath]
 getCompletedFiles path = do
@@ -315,7 +338,7 @@ isBuiltin cmd =
   cmd `elem` builtinNames
 
 builtinNames =
-  ["exit", "echo", "type", "pwd", "complete", "cd", "jobs", "history"]
+  ["exit", "echo", "type", "pwd", "complete", "cd", "jobs", "history", "declare"]
 
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
@@ -443,6 +466,10 @@ runCommandWith inp out err command state =
             pure (True, state')
         "history" -> do
             (s, state') <- getHistory (args command) HistoryNormal state
+            hPutStr out s
+            pure (True, state')
+        "declare" -> do
+            let (s, state') = declareVar state (args command) 
             hPutStr out s
             pure (True, state')
         _ -> do
