@@ -470,7 +470,6 @@ getHistory (x:xs) HistoryRead state = do
         contents <- readFile path
         let newHistory = history state ++ lines contents
             s = state {history = newHistory, unappendedHistoryIndex = length newHistory }
-        putStrLn $ show (length newHistory)
         pure ("", s)
     else
         pure ("history: " ++ x ++ ": no such file", state)
@@ -480,7 +479,7 @@ getHistory (x:xs) HistoryWrite state = do
         Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
         Right _ -> pure ("", state)
 getHistory (x:xs) HistoryAppend state = do
-    result <- try (appendFile x (unlines $ drop (unappendedHistoryIndex state) (history state))) :: IO (Either IOError ())
+    result <- try (appendFile x (unlines $ take (length (history state) - unappendedHistoryIndex state) (history state))) :: IO (Either IOError ())
 
     case result of
         Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
