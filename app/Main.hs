@@ -242,7 +242,7 @@ declareVar state ("-p":xs) = do
 declareVar state (x:xs) = do
     let inp = splitOn '=' x
     if length inp /= 2 || not (validIdentifier $ head inp) then 
-        ("declare: " ++ x ++ ": not a valid identifier", state) 
+        ("declare: `" ++ x ++ "': not a valid identifier", state) 
     else
         ("", state {declares = Map.insert (head inp) (last inp) (declares state)})
 
