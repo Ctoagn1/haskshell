@@ -483,7 +483,7 @@ getHistory (x:xs) HistoryAppend state = do
     case result of
         Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
         Right _ -> do 
-            let s = state {unappendedHistoryIndex = length (history state) - 1 }
+            let s = state {unappendedHistoryIndex = length (history state) }
             pure ("", s)
 
 showHistory :: [String] -> Int -> String
