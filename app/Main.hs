@@ -80,7 +80,9 @@ loop buf prev state = do
                     putStr "$ "
                     hFlush stdout
                     loop "" OtherKey state'
-                else pure ()
+                else do
+                    saveHistory nstate
+                    pure ()
         '\t' -> do 
             handleCompletion buf prev state
             
