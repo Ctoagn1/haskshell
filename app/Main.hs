@@ -54,7 +54,7 @@ loop buf prev state = do
                 loop "" OtherKey state'
             else do
                 putChar '\n'
-                let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1, unappendedHistoryIndex = 0 }
+                let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
                 (continue, nstate) <- runCommand (commandParse (tokenize buf)) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
@@ -479,7 +479,6 @@ getHistory (x:xs) HistoryWrite state = do
         Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
         Right _ -> pure ("", state)
 getHistory (x:xs) HistoryAppend state = do
-    putStrLn $ show (unappendedHistoryIndex state)
     result <- try (appendFile x (unlines $ take (length (history state) - unappendedHistoryIndex state) (history state))) :: IO (Either IOError ())
 
     case result of
