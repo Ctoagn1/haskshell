@@ -48,6 +48,12 @@ initializeHistory state = do
                 Left _ -> pure state
                 Right text -> pure state {history = lines text}
 
+saveHistory :: ShellState -> IO ()
+saveHistory state = do
+    histfile <- lookupEnv "HISTFILE"
+    case histfile of
+        Just f -> appendFile f (unlines $ history state)
+        Nothing -> pure ()
 
 enableRawMode :: IO TerminalAttributes
 enableRawMode = do
