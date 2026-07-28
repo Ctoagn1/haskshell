@@ -370,7 +370,7 @@ varSub (x:xs) acc var_acc state SubDollar =
             else
                 varSub xs (acc ++ [x]) "" state SubDollar
         _ -> do
-            if isAlphaNum x then 
+            if isAlphaNum x || x == '_' then 
                 varSub xs acc (var_acc ++ [x]) state SubDollar
             else do             
                 let v = case Map.lookup var_acc (declares state) of
