@@ -24,7 +24,7 @@ instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
     show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int}
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int, unappendedHistoryIndex :: Int}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
@@ -32,7 +32,7 @@ main = do
     enableRawMode
     putStr "$ "
     hFlush stdout
-    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0}
+    loop "" OtherKey ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0}
 
 
 
@@ -54,7 +54,7 @@ loop buf prev state = do
                 loop "" OtherKey state'
             else do
                 putChar '\n'
-                let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1 }
+                let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1, unappendedHistoryIndex = 0 }
                 (continue, nstate) <- runCommand (commandParse (tokenize buf)) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
@@ -477,12 +477,14 @@ getHistory (x:xs) HistoryWrite state = do
     case result of
         Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
         Right _ -> pure ("", state)
+getHistory (x:xs) HistoryAppend state = do
+    result <- try (appendFile x (unlines $ drop (unappendedHistoryIndex state) (history state))) :: IO (Either IOError ())
 
-
-
-
-
-
+    case result of
+        Left _ -> pure ("history: " ++ x ++ ": could not write to file", state)
+        Right _ -> do 
+            let s = state {unappendedHistoryIndex = length (history state)}
+            pure ("", s)
 
 showHistory :: [String] -> Int -> String
 showHistory [] i = ""
