@@ -342,7 +342,7 @@ builtinNames =
 
 data SubMode = SubNorm | SubDollar | SubOpenBrace
 substituteVars :: [String] -> ShellState -> [String]
-substituteVars inp state = map (\x ->varSub x "" "" state SubNorm) inp
+substituteVars inp state = filter (not . null) (map (\x ->varSub x "" "" state SubNorm) inp)
 
 varSub :: String -> String -> String -> ShellState -> SubMode -> String
 varSub [] acc var_acc state _ = do
