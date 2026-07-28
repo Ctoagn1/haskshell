@@ -238,7 +238,7 @@ declareVar state ("-p":xs) = do
             entry = Map.lookup var (declares state)
         case entry of
             Nothing -> ("declare: " ++ var ++ ": not found", state)
-            Just x -> ("declare -- " ++ var ++ "=\"x\"", state)
+            Just x -> ("declare -- " ++ var ++ "=\"" ++ x ++ "\"", state)
 declareVar state (x:xs) = do
     let inp = splitOn '=' x
     if length inp /= 2 || not (validIdentifier $ head inp) then 
@@ -470,8 +470,9 @@ runCommandWith inp out err command state =
             pure (True, state')
         "declare" -> do
             let (s, state') = declareVar state (args command) 
-            hPutStrLn out s
-            pure (True, state')
+            if null s then pure (True, state') else do 
+                hPutStrLn out s
+                pure (True, state')
         _ -> do
             result <- findExecutable (cmd command) 
             state' <- case result of
