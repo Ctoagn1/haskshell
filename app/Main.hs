@@ -343,7 +343,7 @@ builtinNames =
 varSub :: [String] -> ShellState -> [String] 
 varSub inp state = map (\s -> if "$" `isPrefixOf` s 
     then do 
-        case Map.lookup s (declares state) of
+        case Map.lookup (drop 1 s) (declares state) of
             Nothing -> ""
             Just x -> x
     else s) inp
