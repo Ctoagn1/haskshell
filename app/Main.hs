@@ -75,7 +75,7 @@ loop buf prev state = do
             else do
                 putChar '\n'
                 let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
-                (continue, nstate) <- runCommand (commandParse (tokenize buf)) s
+                (continue, nstate) <- runCommand (commandParse (varSub (tokenize buf) s)) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
                     putStr "$ "
@@ -340,6 +340,13 @@ isBuiltin cmd =
 builtinNames =
   ["exit", "echo", "type", "pwd", "complete", "cd", "jobs", "history", "declare"]
 
+varSub :: [String] -> ShellState -> [String] 
+varSub inp state = map (\s -> if "$" `isPrefixOf` s 
+    then do 
+        case Map.lookup s (declares state) of
+            Nothing -> ""
+            Just x -> x
+    else s) inp
 
 data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
 tokenize :: String -> [String]
