@@ -468,7 +468,8 @@ getHistory (x:xs) HistoryRead state = do
     fExists <- doesFileExist path
     if fExists then do
         contents <- readFile path
-        let s = state {history = history state ++ lines contents}
+        let newHistory = history state ++ lines contents
+            s = state {history = newHistory, unappendedHistoryIndex = length newHistory }
         pure ("", s)
     else
         pure ("history: " ++ x ++ ": no such file", state)
