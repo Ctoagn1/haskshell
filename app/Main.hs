@@ -18,7 +18,7 @@ import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 import Text.Read (readMaybe)
 import System.Directory.Internal.Prelude (catchIOError, try, isAlpha)
-import GHC.IO.Exception (IOException(IOError))
+import GHC.IO.Exception (IOException(IOError), ExitCode (ExitSuccess))
 import Data.Char (isAlphaNum)
 import System.Posix (forkProcess, getProcessStatus)
 
@@ -77,13 +77,17 @@ loop buf prev state = do
                 putChar '\n'
                 let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
                 let run x st = case x of
-                            [] -> pure (True, st)
-                            [y] -> runCommand y st True 
+                            [] -> pure (True, st, Nothing)
+                            [y] -> runCommand y st 
                             _ -> do 
                                 executePipeline x st
-                                pure (True, st)
+                                pure (True, st, Nothing)
                                  
-                (continue, nstate) <- run (parsePipeline $ substituteVars (tokenize buf) s) s
+                (continue, nstate, h) <- run (parsePipeline $ substituteVars (tokenize buf) s) s
+                case h of
+                    Nothing -> pure ExitSuccess
+                    Just x -> waitForProcess x
+
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
                     putStr "$ "
@@ -472,56 +476,60 @@ executePipeline commands s = do
             when (inFd /= stdInput) (void (dupTo inFd stdInput))
             when (outFd /= stdOutput) (void (dupTo outFd stdOutput))
             mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
-            _ <-runCommand c s False
+            (_, _, h) <- runCommand c s
+            case h of
+                Nothing -> pure ExitSuccess
+                Just x -> waitForProcess x
+
             pure ())
 
     mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
     mapM_ (getProcessStatus True False) pids
 
-runCommand :: Command -> ShellState -> Bool -> IO (Bool, ShellState)
-runCommand command state wait=
+runCommand :: Command -> ShellState -> IO (Bool, ShellState, Maybe ProcessHandle)
+runCommand command state =
     case redirect command of
-        Nothing -> runCommandWith stdin stdout stderr command state wait
+        Nothing -> runCommandWith stdin stdout stderr command state
         Just (OutWrite, t) -> do
             path <- resolvePath t 
             withFile path WriteMode $ \h ->
-                runCommandWith stdin h stderr command state wait
+                runCommandWith stdin h stderr command state
         Just (ErrWrite, t) -> do
             path <- resolvePath t
             withFile path WriteMode $ \h ->
-                runCommandWith stdin stdout h command state wait
+                runCommandWith stdin stdout h command state
         Just (OutAppend, t) -> do
             path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith stdin h stderr command state wait
+                runCommandWith stdin h stderr command state
         Just (ErrAppend, t) -> do
             path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith stdin stdout h command state wait
+                runCommandWith stdin stdout h command state
                 
-runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> Bool -> IO (Bool, ShellState)
-runCommandWith inp out err command state wait= 
+runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState, Maybe ProcessHandle)
+runCommandWith inp out err command state = 
     case cmd command of
         "exit" ->
-            pure (False, state)
+            pure (False, state, Nothing)
         "pwd" -> do
             cwd <- getCurrentDirectory
             hPutStrLn out cwd
-            pure (True, state)
+            pure (True, state, Nothing)
         "cd" -> do
             let arg = unwords (args command)
             newCwd <- resolvePath arg
             isDir <- doesDirectoryExist newCwd
             if isDir then do
                 setCurrentDirectory newCwd
-                pure (True, state)
+                pure (True, state, Nothing)
             else do
                 hPutStrLn out ("cd: " ++ arg ++ ": No such file or directory")
-                pure (True, state)
+                pure (True, state, Nothing)
 
         "echo" -> do
             hPutStrLn out (unwords (args command))
-            pure (True, state)
+            pure (True, state, Nothing)
         "type" -> do
             let arg = unwords (args command)
             if isBuiltin arg
@@ -533,29 +541,29 @@ runCommandWith inp out err command state wait=
                         hPutStrLn out $ arg ++ " is " ++ fullPath
                     Nothing ->
                         hPutStrLn out $ arg ++ ": not found"
-            pure (True, state)
+            pure (True, state, Nothing)
         "complete" -> do
             (str, nstate) <- completeFunc (args command) Awaiting state
             if null str then pure 
-                (True, nstate)
+                (True, nstate, Nothing)
             else do
                 hPutStrLn out str
-                pure (True, nstate)
+                pure (True, nstate, Nothing)
         "jobs" -> do
             state' <- reapJobs All state out
-            pure (True, state')
+            pure (True, state', Nothing)
         "history" -> do
             (s, state') <- getHistory (args command) HistoryNormal state
             hPutStr out s
-            pure (True, state')
+            pure (True, state', Nothing)
         "declare" -> do
             let (s, state') = declareVar state (args command) 
-            if null s then pure (True, state') else do 
+            if null s then pure (True, state', Nothing) else do 
                 hPutStrLn out s
-                pure (True, state')
+                pure (True, state', Nothing)
         _ -> do
             result <- findExecutable (cmd command) 
-            state' <- case result of
+            (state', handle) <- case result of
                 Just fullPath -> do
                     (_, _, _, processHandle) <-
                         createProcess
@@ -571,16 +579,13 @@ runCommandWith inp out err command state wait=
                             procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
                             state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobIds = j_id:latestJobIds state}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
-                        pure state'
+                        pure (state', Just processHandle)
                     else do
-                        if wait then do 
-                            _ <- waitForProcess processHandle
-                            pure state
-                        else pure state
+                        pure (state, Just processHandle)
                 Nothing -> do
                     hPutStrLn out $ cmd command ++ ": command not found"
-                    pure state
-            pure (True, state')
+                    pure (state, Nothing)
+            pure (True, state', handle)
 
 data HistoryMode =  HistoryNormal | HistoryRead | HistoryWrite | HistoryAppend
 getHistory :: [String] ->  HistoryMode -> ShellState -> IO (String, ShellState)
