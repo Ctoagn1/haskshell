@@ -78,7 +78,7 @@ loop buf prev state = do
                 let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
                 let run x st = case x of
                             [] -> pure (True, st)
-                            [y] -> runCommand y st 
+                            [y] -> runCommand y st True 
                             _ -> do 
                                 executePipeline x st
                                 pure (True, st)
@@ -472,35 +472,35 @@ executePipeline commands s = do
             when (inFd /= stdInput) (void (dupTo inFd stdInput))
             when (outFd /= stdOutput) (void (dupTo outFd stdOutput))
             mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
-            _ <-runCommand c s
+            _ <-runCommand c s False
             pure ())
 
     mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
     mapM_ (getProcessStatus True False) pids
 
-runCommand :: Command -> ShellState -> IO (Bool, ShellState)
-runCommand command state=
+runCommand :: Command -> ShellState -> Bool -> IO (Bool, ShellState)
+runCommand command state wait=
     case redirect command of
-        Nothing -> runCommandWith stdin stdout stderr command state
+        Nothing -> runCommandWith stdin stdout stderr command state wait
         Just (OutWrite, t) -> do
             path <- resolvePath t 
             withFile path WriteMode $ \h ->
-                runCommandWith stdin h stderr command state
+                runCommandWith stdin h stderr command state wait
         Just (ErrWrite, t) -> do
             path <- resolvePath t
             withFile path WriteMode $ \h ->
-                runCommandWith stdin stdout h command state
+                runCommandWith stdin stdout h command state wait
         Just (OutAppend, t) -> do
             path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith stdin h stderr command state
+                runCommandWith stdin h stderr command state wait
         Just (ErrAppend, t) -> do
             path <- resolvePath t
             withFile path AppendMode $ \h ->
-                runCommandWith stdin stdout h command state
+                runCommandWith stdin stdout h command state wait
                 
-runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState)
-runCommandWith inp out err command state = 
+runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> Bool -> IO (Bool, ShellState)
+runCommandWith inp out err command state wait= 
     case cmd command of
         "exit" ->
             pure (False, state)
@@ -573,8 +573,10 @@ runCommandWith inp out err command state =
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
                         pure state'
                     else do
-                        _ <- waitForProcess processHandle
-                        pure state
+                        if wait then do 
+                            _ <- waitForProcess processHandle
+                            pure state
+                        else pure state
                 Nothing -> do
                     hPutStrLn out $ cmd command ++ ": command not found"
                     pure state
