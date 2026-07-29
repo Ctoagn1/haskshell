@@ -461,19 +461,6 @@ commandParse input =
                         _ -> go xs (args ++ [x]) redirect Norm
                 Redir mode -> go xs args (Just (mode, x)) Norm
 
-runPipeline :: [Command] -> IO ()
-runPipeline commands = do
-    handles <- spawn Inherit (filter (not . null . cmd) commands)
-    mapM_ waitForProcess (reverse handles)
-    where
-        spawn _ [] = pure []
-        spawn inp [c] = do
-            (_, _, _, ph) <- createProcess (proc (cmd c) (args c)) {std_in = inp, std_out = Inherit}
-            return [ph]
-        spawn inp (c:cx) = do
-            (_, Just hout, _, ph) <- createProcess (proc (cmd c) (args c)) {std_in = inp, std_out = CreatePipe}
-            phs <- spawn (UseHandle hout) cx
-            return (ph:phs)
 
 executePipeline :: [Command] -> ShellState -> IO ()
 executePipeline commands s = do
