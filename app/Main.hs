@@ -2,10 +2,10 @@ module Main (main) where
 
 import System.IO (hFlush, hPutStrLn, stdout, stderr, withFile, Handle, IOMode (WriteMode, AppendMode), NewlineMode (inputNL), stdin, hReady, hPutStr)
 import System.Directory (findExecutable, getCurrentDirectory, getHomeDirectory, doesDirectoryExist, listDirectory, doesFileExist, Permissions (executable), getPermissions, doesPathExist, getDirectoryContents, setCurrentDirectory)
-import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd, std_in), StdStream (UseHandle, Inherit), readProcess, ProcessHandle, getPid, getProcessExitCode)
+import System.Process (proc, createProcess, std_out, std_err, waitForProcess, CreateProcess (cwd, std_in), StdStream (UseHandle, Inherit, CreatePipe), readProcess, ProcessHandle, getPid, getProcessExitCode)
 import Control.Monad.IO.Class
 import System.Posix.Terminal
-import System.Posix.IO (stdInput)
+import System.Posix.IO (stdInput, closeFd, stdOutput, createPipe, dupTo)
 import GHC.IO.Encoding (CodingProgress(OutputUnderflow))
 import Data.List (isPrefixOf, nub, intercalate, sort)
 import qualified Data.Map as Map
@@ -20,6 +20,7 @@ import Text.Read (readMaybe)
 import System.Directory.Internal.Prelude (catchIOError, try, isAlpha)
 import GHC.IO.Exception (IOException(IOError))
 import Data.Char (isAlphaNum)
+import System.Posix (forkProcess, getProcessStatus)
 
 data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
@@ -75,7 +76,14 @@ loop buf prev state = do
             else do
                 putChar '\n'
                 let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
-                (continue, nstate) <- runCommand (commandParse $ substituteVars (tokenize buf) s) s
+                let run x st = case x of
+                            [] -> pure (True, st)
+                            [y] -> runCommand y st 
+                            _ -> do 
+                                executePipeline x st
+                                pure (True, st)
+                                 
+                (continue, nstate) <- run (parsePipeline $ substituteVars (tokenize buf) s) s
                 if continue then do
                     state' <- reapJobs DoneOnly nstate stdout 
                     putStr "$ "
@@ -422,6 +430,14 @@ tokenize path =
                 Backslash last_state ->
                     go cs (current ++ [c]) tokens last_state
 
+
+parsePipeline :: [String] -> [Command]
+parsePipeline toks = do
+    let c =  splitOn "|" toks
+    map commandParse c
+        
+    
+
 data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String), isBgJob :: Bool}
 data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 
 data ParseMode = Redir Redirect | Norm | Bg
@@ -429,6 +445,7 @@ commandParse :: [String] -> Command
 commandParse input = 
     go input [] Nothing Norm
     where 
+        go [] [] r _ = Command {cmd = "", args = [], redirect = r, isBgJob = False }
         go [] args redirect _ = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = False}
         go ["&"] args redirect Norm  = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = True}
         go (x:xs) args redirect mode = 
@@ -444,17 +461,42 @@ commandParse input =
                         _ -> go xs (args ++ [x]) redirect Norm
                 Redir mode -> go xs args (Just (mode, x)) Norm
 
-{-}
-pipeline :: [[String]] -> IO (Bool, ShellState)
-pipeline input = do
-    let commandList = map commandParse input
--}
+runPipeline :: [Command] -> IO ()
+runPipeline commands = do
+    handles <- spawn Inherit (filter (not . null . cmd) commands)
+    mapM_ waitForProcess (reverse handles)
+    where
+        spawn _ [] = pure []
+        spawn inp [c] = do
+            (_, _, _, ph) <- createProcess (proc (cmd c) (args c)) {std_in = inp, std_out = Inherit}
+            return [ph]
+        spawn inp (c:cx) = do
+            (_, Just hout, _, ph) <- createProcess (proc (cmd c) (args c)) {std_in = inp, std_out = CreatePipe}
+            phs <- spawn (UseHandle hout) cx
+            return (ph:phs)
+
+executePipeline :: [Command] -> ShellState -> IO ()
+executePipeline commands s = do
+    pipes <- replicateM (length commands - 1 ) createPipe
+    let inFds = stdInput : map fst pipes
+        outFds = map snd pipes ++ [stdOutput]
+    pids <- forM (zip3 commands inFds outFds) $ \(c, inFd, outFd) ->
+        forkProcess (do
+            when (inFd /= stdInput) (void (dupTo inFd stdInput))
+            when (outFd /= stdOutput) (void (dupTo outFd stdOutput))
+            mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
+            _ <-runCommand c s
+            pure ())
+
+    mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
+    mapM_ (getProcessStatus True False) pids
+
 runCommand :: Command -> ShellState -> IO (Bool, ShellState)
 runCommand command state=
     case redirect command of
         Nothing -> runCommandWith stdin stdout stderr command state
         Just (OutWrite, t) -> do
-            path <- resolvePath t
+            path <- resolvePath t 
             withFile path WriteMode $ \h ->
                 runCommandWith stdin h stderr command state
         Just (ErrWrite, t) -> do
