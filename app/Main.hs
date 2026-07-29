@@ -579,7 +579,7 @@ runCommandWith inp out err command state =
                             procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
                             state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobIds = j_id:latestJobIds state}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
-                        pure (state', Just processHandle)
+                        pure (state', Nothing)
                     else do
                         pure (state, Just processHandle)
                 Nothing -> do
