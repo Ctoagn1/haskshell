@@ -18,26 +18,33 @@ import Data.Maybe (isJust)
 import System.Process.Internals (ProcessHandle__)
 import Text.Read (readMaybe)
 import System.Directory.Internal.Prelude (catchIOError, try, isAlpha)
-import GHC.IO.Exception (IOException(IOError), ExitCode (ExitSuccess))
+import GHC.IO.Exception (IOException(IOError), ExitCode (ExitSuccess, ExitFailure))
 import Data.Char (isAlphaNum)
-import System.Posix (forkProcess, getProcessStatus)
+import System.Posix (forkProcess, getProcessStatus, installHandler, keyboardSignal, Handler (Catch), sigINT, ProcessStatus (Exited))
+import System.Exit (exitWith)
 
 data ProcStatus = Running | Done deriving (Eq)
 instance Show ProcStatus where
     show Running = "Running" ++ replicate 17 ' '
     show Done = "Done" ++ replicate 20 ' '
 data ProcInfo = ProcInfo {handle :: ProcessHandle, name :: String, status :: ProcStatus }
-data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int, unappendedHistoryIndex :: Int, declares :: Map.Map String String }
+data ShellState = ShellState {completions :: Map.Map String FilePath, bgJobs :: Map.Map Int ProcInfo, nextJobId :: Int, latestJobIds :: [Int], history :: [String], historyPosition :: Int, unappendedHistoryIndex :: Int, declares :: Map.Map String String, lastExitCode :: ExitCode}
 
 data KeyType = TabKey | OtherKey
 main :: IO ()
 main = do
     enableRawMode
-    putStr "$ "
-    let init = ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0, declares = Map.empty} 
+    let init = ShellState {completions = Map.empty, bgJobs = Map.empty, nextJobId = 1, latestJobIds = [], history = [], historyPosition = 0, unappendedHistoryIndex = 0, declares = Map.empty, lastExitCode = ExitSuccess} 
+    printPrompt init
     state <- initializeHistory init
-    hFlush stdout
     loop "" OtherKey state
+
+printPrompt :: ShellState -> IO ()
+printPrompt state = do
+    case lastExitCode state of
+        ExitSuccess -> putStr "\x1B[38;2;114;54;186mλ:\x1B[0m "
+        ExitFailure _ -> putStr "\x1B[38;2;165;29;45mλ:\x1B[0m "
+    hFlush stdout
 
 initializeHistory :: ShellState -> IO ShellState
 initializeHistory state = do
@@ -60,7 +67,7 @@ saveHistory state = do
 enableRawMode :: IO TerminalAttributes
 enableRawMode = do
     old <- getTerminalAttributes stdInput 
-    let raw = foldl withoutMode old [EnableEcho, ProcessInput, KeyboardInterrupts, StartStopOutput]
+    let raw = foldl withoutMode old [EnableEcho, ProcessInput, StartStopOutput]
     setTerminalAttributes stdInput raw Immediately
     pure old
 loop :: String -> KeyType -> ShellState -> IO ()
@@ -77,21 +84,20 @@ loop buf prev state = do
                 putChar '\n'
                 let s = state {history = history state ++ [buf], historyPosition = length (history state) + 1}
                 let run x st = case x of
-                            [] -> pure (True, st, Nothing)
+                            [] -> pure (True, st, Right (lastExitCode st) )
                             [y] -> runCommand y st 
                             _ -> do 
-                                executePipeline x st
-                                pure (True, st, Nothing)
+                                c <- executePipeline x st
+                                pure (True, st, Right c)
                                  
                 (continue, nstate, h) <- run (parsePipeline $ substituteVars (tokenize buf) s) s
-                case h of
-                    Nothing -> pure ExitSuccess
-                    Just x -> waitForProcess x
-
+                exCode <- case h of
+                    Right y -> pure y
+                    Left x -> waitForProcess x
+                let updatedState = nstate {lastExitCode = exCode}
                 if continue then do
-                    state' <- reapJobs DoneOnly nstate stdout 
-                    putStr "$ "
-                    hFlush stdout
+                    state' <- reapJobs DoneOnly updatedState stdout 
+                    printPrompt state'
                     loop "" OtherKey state'
                 else do
                     saveHistory nstate
@@ -152,7 +158,7 @@ handleDownArrow buf state = do
 handleCompletion :: String -> KeyType -> ShellState -> IO ()
 handleCompletion input prev state = do
     let wds=  words input
-    let allwords = if last input == ' ' then wds ++ [""] else wds
+    let allwords = if not (null input) && last input == ' ' then wds ++ [""] else wds
     case allwords of
         [] -> loop input OtherKey state
         [command] -> do
@@ -177,8 +183,7 @@ handleCompletion input prev state = do
                     putChar '\n'
                     putStr $ intercalate "\t" (sort matches)
                     putChar '\n'
-                    putStr $ "$ " ++ input
-                    hFlush stdout
+                    printPrompt state
                     loop input TabKey state
         _ -> do
 
@@ -218,7 +223,7 @@ handleCompletion input prev state = do
                     putChar '\n'
                     putStr $ intercalate "\t" (sort matches)
                     putChar '\n'
-                    putStr $ "$ " ++ input
+                    putStr $ "\x1B[38;2;114;54;186mλ:\x1B[0m " ++ input
                     hFlush stdout
                     loop input TabKey state
 
@@ -353,8 +358,8 @@ builtinNames =
   ["exit", "echo", "type", "pwd", "complete", "cd", "jobs", "history", "declare"]
 
 data SubMode = SubNorm | SubDollar | SubOpenBrace
-substituteVars :: [String] -> ShellState -> [String]
-substituteVars inp state = filter (not . null) (map (\x ->varSub x "" "" state SubNorm) inp)
+substituteVars :: [(String, Bool)] -> ShellState -> [(String, Bool)]
+substituteVars inp state = filter (not . null) (map (\x ->if (not . snd) x then (varSub (fst x) "" "" state SubNorm, False) else x) inp)
 
 varSub :: String -> String -> String -> ShellState -> SubMode -> String
 varSub [] acc var_acc state _ = do
@@ -404,40 +409,42 @@ varSub (x:xs) acc var_acc state SubOpenBrace =
 
 
 
-data TokenState = Normal | SingleQuote | DoubleQuote | Backslash TokenState
-tokenize :: String -> [String]
+data TokenState = Normal Bool | SingleQuote | DoubleQuote | Backslash TokenState
+tokenize :: String -> [(String, Bool)]
 tokenize path = 
-    go path "" [] Normal
+    go path "" [] (Normal False)
     where 
         go [] current tokens state
             | null current = tokens
-            | otherwise = tokens ++ [current]
+            | otherwise = tokens ++ [(current, case state of
+                Normal x -> x
+                _ -> False)]
 
         go (c:cs) current tokens state =
             case state of
-                Normal ->
+                Normal lastQuoted->
                     case c of
-                        '\'' -> go cs current tokens SingleQuote
-                        '"' -> go cs current tokens DoubleQuote
-                        '\\' -> go cs current tokens (Backslash state)
-                        ' ' -> go cs "" (if null current then tokens else tokens ++ [current]) Normal
-                        _ -> go cs (current ++ [c]) tokens Normal
+                        '\'' -> go cs current tokens SingleQuote 
+                        '"' -> go cs current tokens DoubleQuote 
+                        '\\' -> go cs current tokens (Backslash state) 
+                        ' ' -> go cs "" (if null current then tokens else tokens ++ [(current, lastQuoted)]) (Normal False)
+                        _ -> go cs (current ++ [c]) tokens (Normal False)
                 SingleQuote ->
                     case c of
-                        '\'' -> go cs current tokens Normal
+                        '\'' -> go cs current tokens (Normal True)
                         _ -> go cs (current ++ [c]) tokens SingleQuote
                 DoubleQuote ->
                     case c of 
-                        '"' -> go cs current tokens Normal
+                        '"' -> go cs current tokens (Normal True) 
                         '\\' -> go cs current tokens (Backslash state)
                         _ -> go cs (current ++ [c]) tokens DoubleQuote
                 Backslash last_state ->
                     go cs (current ++ [c]) tokens last_state
 
 
-parsePipeline :: [String] -> [Command]
+parsePipeline :: [(String, Bool)] -> [Command]
 parsePipeline toks = do
-    let c =  splitOn "|" toks
+    let c =  splitOn ("|", False) toks
     map commandParse c
         
     
@@ -445,28 +452,27 @@ parsePipeline toks = do
 data Command = Command {cmd :: String, args :: [String], redirect :: Maybe (Redirect, String), isBgJob :: Bool}
 data Redirect = OutWrite | OutAppend | ErrWrite| ErrAppend 
 data ParseMode = Redir Redirect | Norm | Bg
-commandParse :: [String] -> Command
+commandParse :: [(String, Bool)] -> Command
 commandParse input = 
     go input [] Nothing Norm
     where 
         go [] [] r _ = Command {cmd = "", args = [], redirect = r, isBgJob = False }
         go [] args redirect _ = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = False}
-        go ["&"] args redirect Norm  = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = True}
+        go [("&", False)] args redirect Norm  = Command {cmd = head args, args = tail args, redirect = redirect, isBgJob = True}
         go (x:xs) args redirect mode = 
             case mode of 
                 Norm ->
                     case x of 
-                        "1>" -> go xs args redirect (Redir OutWrite) 
-                        ">" -> go xs args redirect (Redir OutWrite) 
-                        ">>" -> go xs args redirect (Redir OutAppend) 
-                        "1>>" -> go xs args redirect (Redir OutAppend) 
-                        "2>" -> go xs args redirect (Redir ErrWrite) 
-                        "2>>" -> go xs args redirect (Redir ErrAppend) 
-                        _ -> go xs (args ++ [x]) redirect Norm
-                Redir mode -> go xs args (Just (mode, x)) Norm
+                        ("1>", False) -> go xs args redirect (Redir OutWrite) 
+                        (">", False) -> go xs args redirect (Redir OutWrite) 
+                        (">>", False) -> go xs args redirect (Redir OutAppend) 
+                        ("1>>", False) -> go xs args redirect (Redir OutAppend) 
+                        ("2>", False) -> go xs args redirect (Redir ErrWrite) 
+                        ("2>>", False) -> go xs args redirect (Redir ErrAppend) 
+                        _ -> go xs (args ++ [fst x]) redirect Norm
+                Redir mode -> go xs args (Just (mode, fst x)) Norm
 
-
-executePipeline :: [Command] -> ShellState -> IO ()
+executePipeline :: [Command] -> ShellState -> IO ExitCode
 executePipeline commands s = do
     pipes <- replicateM (length commands - 1 ) createPipe
     let inFds = stdInput : map fst pipes
@@ -477,16 +483,23 @@ executePipeline commands s = do
             when (outFd /= stdOutput) (void (dupTo outFd stdOutput))
             mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
             (_, _, h) <- runCommand c s
-            case h of
-                Nothing -> pure ExitSuccess
-                Just x -> waitForProcess x
-
-            pure ())
+            z <- case h of
+                    Right x -> pure x
+                    Left x -> waitForProcess x
+            exitWith z
+            )
 
     mapM_ (\(r, w) -> closeFd r >> closeFd w) pipes
-    mapM_ (getProcessStatus True False) pids
+    stats <- mapM (getProcessStatus True False) pids
+    case last stats of
+        Just status -> do 
+            case status of
+                Exited c -> pure c
+                _  -> pure ExitSuccess
 
-runCommand :: Command -> ShellState -> IO (Bool, ShellState, Maybe ProcessHandle)
+
+
+runCommand :: Command -> ShellState -> IO (Bool, ShellState, Either ProcessHandle ExitCode)
 runCommand command state =
     case redirect command of
         Nothing -> runCommandWith stdin stdout stderr command state
@@ -507,63 +520,66 @@ runCommand command state =
             withFile path AppendMode $ \h ->
                 runCommandWith stdin stdout h command state
                 
-runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState, Maybe ProcessHandle)
+runCommandWith :: Handle -> Handle -> Handle -> Command -> ShellState -> IO (Bool, ShellState, Either ProcessHandle ExitCode)
 runCommandWith inp out err command state = 
     case cmd command of
         "exit" ->
-            pure (False, state, Nothing)
+            pure (False, state, Right ExitSuccess)
         "pwd" -> do
             cwd <- getCurrentDirectory
             hPutStrLn out cwd
-            pure (True, state, Nothing)
+            pure (True, state, Right ExitSuccess)
         "cd" -> do
             let arg = unwords (args command)
             newCwd <- resolvePath arg
             isDir <- doesDirectoryExist newCwd
             if isDir then do
                 setCurrentDirectory newCwd
-                pure (True, state, Nothing)
+                pure (True, state, Right ExitSuccess)
             else do
-                hPutStrLn out ("cd: " ++ arg ++ ": No such file or directory")
-                pure (True, state, Nothing)
+                hPutStrLn err ("cd: " ++ arg ++ ": No such file or directory")
+                pure (True, state, Right (ExitFailure 1))
 
         "echo" -> do
             hPutStrLn out (unwords (args command))
-            pure (True, state, Nothing)
+            pure (True, state, Right ExitSuccess)
         "type" -> do
             let arg = unwords (args command)
             if isBuiltin arg
-                then hPutStrLn out $ arg ++ " is a shell builtin"
+                then do 
+                    hPutStrLn out $ arg ++ " is a shell builtin"
+                    pure (True, state, Right ExitSuccess)
                 else do
                 result <- findExecutable arg
                 case result of
-                    Just fullPath ->
+                    Just fullPath -> do
                         hPutStrLn out $ arg ++ " is " ++ fullPath
-                    Nothing ->
-                        hPutStrLn out $ arg ++ ": not found"
-            pure (True, state, Nothing)
+                        pure (True, state, Right ExitSuccess)
+                    Nothing -> do
+                        hPutStrLn err $ arg ++ ": not found"
+                        pure (True, state, Right (ExitFailure 1))
         "complete" -> do
             (str, nstate) <- completeFunc (args command) Awaiting state
             if null str then pure 
-                (True, nstate, Nothing)
+                (True, nstate, Right ExitSuccess)
             else do
                 hPutStrLn out str
-                pure (True, nstate, Nothing)
+                pure (True, nstate, Right ExitSuccess)
         "jobs" -> do
             state' <- reapJobs All state out
-            pure (True, state', Nothing)
+            pure (True, state', Right ExitSuccess)
         "history" -> do
             (s, state') <- getHistory (args command) HistoryNormal state
             hPutStr out s
-            pure (True, state', Nothing)
+            pure (True, state', Right ExitSuccess)
         "declare" -> do
             let (s, state') = declareVar state (args command) 
-            if null s then pure (True, state', Nothing) else do 
+            if null s then pure (True, state', Right ExitSuccess) else do 
                 hPutStrLn out s
-                pure (True, state', Nothing)
+                pure (True, state', Right ExitSuccess)
         _ -> do
             result <- findExecutable (cmd command) 
-            (state', handle) <- case result of
+            case result of
                 Just fullPath -> do
                     (_, _, _, processHandle) <-
                         createProcess
@@ -579,13 +595,12 @@ runCommandWith inp out err command state =
                             procInf = ProcInfo {name = cmd command ++ " " ++ unwords (args command), handle = processHandle, status = Running}
                             state' = state {bgJobs = Map.insert j_id procInf (bgJobs state), nextJobId = j_id + 1, latestJobIds = j_id:latestJobIds state}
                         putStrLn $ "[" ++ show j_id ++ "] " ++ osPid
-                        pure (state', Nothing)
+                        pure (True, state', Right ExitSuccess)
                     else do
-                        pure (state, Just processHandle)
+                        pure (True, state, Left processHandle)
                 Nothing -> do
                     hPutStrLn out $ cmd command ++ ": command not found"
-                    pure (state, Nothing)
-            pure (True, state', handle)
+                    pure (True, state, Right (ExitFailure 1))
 
 data HistoryMode =  HistoryNormal | HistoryRead | HistoryWrite | HistoryAppend
 getHistory :: [String] ->  HistoryMode -> ShellState -> IO (String, ShellState)
