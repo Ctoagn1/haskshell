@@ -12,6 +12,14 @@ build-type:     Simple
 executable codecrafters-shell-exe
   main-is: Main.hs
   other-modules:
+      Shell.Completions
+      Shell.Exec
+      Shell.History
+      Shell.Jobs
+      Shell.Parsing
+      Shell.Repl
+      Shell.Types
+      Shell.Variables
       Paths_haskshell
   hs-source-dirs:
       app
